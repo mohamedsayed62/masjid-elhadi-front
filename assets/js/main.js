@@ -22,7 +22,6 @@
 
   const form = document.getElementById('walletForm');
   const nameInput = document.getElementById('sessionName');
-  const dateInput = document.getElementById('startDate');
   const nameShell = document.getElementById('nameShell');
   const dateShell = document.getElementById('dateShell');
   const nameError = document.getElementById('nameError');
@@ -31,10 +30,6 @@
   const btnSpinner = document.getElementById('btnSpinner');
   const btnLabel = document.getElementById('btnLabel');
   const toast = document.getElementById('toast');
-
-  // default date = today
-  const today = new Date().toISOString().split('T')[0];
-  dateInput.value = today;
 
   // =====================================================================
   // UI helpers
@@ -167,11 +162,6 @@
     }
   });
 
-  dateInput.addEventListener('input', () => {
-    if (dateInput.value.length > 0) {
-      setInvalid(dateShell, dateError, false);
-    }
-  });
 
   form.addEventListener('submit', async function (e) {
     e.preventDefault();
