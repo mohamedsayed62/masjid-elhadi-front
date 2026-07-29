@@ -1,0 +1,23 @@
+body { font-family: 'Cairo', sans-serif; background-color: #F5F6F8; }
+.stat-card { transition: all 0.3s ease; }
+.stat-card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(11,29,58,0.08); }
+.fade-in { animation: fadeIn 0.5s ease both; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.tab-btn { transition: all 0.2s ease; }
+.tab-btn.active { background: #0B1D3A; color: #fff; box-shadow: 0 4px 12px rgba(11,29,58,0.2); }
+.empty-state { animation: floaty 3s ease-in-out infinite; }
+@keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+.progress-bar { transition: width 0.6s ease; }
+.session-row:hover, .student-row:hover { background: #f9f9f9; }
+.status-pill { display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }
+.status-pill.present { background:#d4f5dd; color:#1E7D45; }
+.status-pill.absent { background:#ffdad6; color:#BA1A1A; }
+.status-pill.late { background:#ffedd5; color:#E67E22; }
+.status-pill.excused { background:#fef3c7; color:#B45309; }
+.analysis-bar { display:flex; height:8px; border-radius:999px; overflow:hidden; background:#e2e2e2; }
+.analysis-bar > div { transition: width 0.8s ease; }
+.legend-dot { width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0; }
+.spinner { width:18px; height:18px; border:2.5px solid rgba(255,255,255,0.4); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; display:none; }
+.spinner.show { display:inline-block; }
+@keyframes spin { to { transform:rotate(360deg); } }
+@media print { .no-print { display: none !important; } body { background: #fff; } }

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>إضافة طالب - مسجد الهدي النبوي</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="assets/css/add-student.css"/>
+</head>
+<body>
+<div class="mobile-container">
+  <header class="page-header">
+    <button onclick="history.back()" class="back-btn">
+      <span class="material-symbols-outlined">arrow_forward_ios</span>
+    </button>
+    <h1>إضافة طالب</h1>
+    <div style="width:40px"></div>
+  </header>
+
+  <main>
+    <form id="studentForm">
+
+      <!-- الاسم -->
+      <div class="field-group">
+        <label>اسم الطالب</label>
+        <div class="input-shell" id="nameShell">
+          <span class="material-symbols-outlined icon">person</span>
+          <input id="name" type="text" placeholder="أدخل اسم الطالب كاملاً"/>
+        </div>
+        <span class="error-text" id="nameError">هذا الحقل مطلوب</span>
+      </div>
+
+      <!-- الجنس -->
+      <div class="field-group">
+        <label>الجنس</label>
+        <div class="gender-group">
+          <label class="gender-option" id="maleOption">
+            <input type="radio" name="gender" value="ذكر"/>
+            <span class="material-symbols-outlined">male</span>
+            ذكر
+          </label>
+          <label class="gender-option" id="femaleOption">
+            <input type="radio" name="gender" value="أنثى"/>
+            <span class="material-symbols-outlined">female</span>
+            أنثى
+          </label>
+        </div>
+        <span class="error-text" id="genderError">يرجى تحديد الجنس</span>
+      </div>
+
+      <!-- اسم ولي الأمر -->
+      <div class="field-group">
+        <label>اسم ولي الأمر</label>
+        <div class="input-shell" id="parentShell">
+          <span class="material-symbols-outlined icon">supervisor_account</span>
+          <input id="parent_name" type="text" placeholder="أدخل اسم ولي الأمر"/>
+        </div>
+        <span class="error-text" id="parentError">هذا الحقل مطلوب</span>
+      </div>
+
+      <!-- رقم الهاتف -->
+      <div class="field-group">
+        <label>رقم الهاتف</label>
+        <div class="input-shell" id="phoneShell">
+          <span class="material-symbols-outlined icon">call</span>
+          <input id="phone_number" type="tel" placeholder="05xxxxxxxx"/>
+        </div>
+        <span class="error-text" id="phoneError">هذا الحقل مطلوب</span>
+      </div>
+
+      <!-- العمر -->
+      <div class="field-group">
+        <label>العمر</label>
+        <div class="input-shell" id="ageShell">
+          <span class="material-symbols-outlined icon">cake</span>
+          <input id="age" type="number" min="1" max="99" placeholder="العمر بالسنوات"/>
+        </div>
+        <span class="error-text" id="ageError">هذا الحقل مطلوب</span>
+      </div>
+
+      <button type="submit" class="btn-primary" id="saveBtn">
+        <div class="spinner" id="btnSpinner"></div>
+        <span id="btnLabel">حفظ الطالب</span>
+      </button>
+
+    </form>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="assets/js/add-student.js"></script>
+</body>
+</html>

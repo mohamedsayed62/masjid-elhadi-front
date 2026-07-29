@@ -1,0 +1,209 @@
+body {
+    font-family: 'Cairo', sans-serif;
+    background-color: #F5F6F8;
+}
+
+.islamic-pattern {
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23C9A23A' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease both;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.empty-float {
+    animation: floaty 3s ease-in-out infinite;
+}
+
+@keyframes floaty {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+
+.menu-item { transition: all 0.2s ease; }
+.menu-item:hover { background: #f3f3f4; }
+
+/* ---- Search ---- */
+.search-shell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #FFFFFF;
+    border: 1px solid #e2e2e2;
+    border-radius: 14px;
+    padding: 0 14px;
+    box-shadow: 0 1px 2px rgba(11, 29, 58, 0.04);
+}
+
+.search-shell input {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: 'Cairo', sans-serif;
+    font-size: 15px;
+    color: #0B1D3A;
+    padding: 12px 0;
+}
+
+.search-shell input::placeholder {
+    color: #44474D;
+}
+
+/* ---- Skeleton loading cards ---- */
+.skeleton-card {
+    height: 84px;
+    border-radius: 16px;
+    background: linear-gradient(90deg, #eceef0 25%, #f5f6f8 37%, #eceef0 63%);
+    background-size: 400% 100%;
+    animation: skeletonPulse 1.4s ease infinite;
+}
+
+@keyframes skeletonPulse {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+/* ---- Student card ---- */
+.student-card {
+    background: #FFFFFF;
+    border-radius: 16px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 3px rgba(11, 29, 58, 0.06);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    transition: box-shadow .2s ease, transform .2s ease;
+}
+
+.student-card:hover {
+    box-shadow: 0 4px 14px rgba(11, 29, 58, 0.1);
+    transform: translateY(-1px);
+}
+
+.student-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-weight: 700;
+    font-size: 15px;
+    color: #0B1D3A;
+    background: rgba(11, 29, 58, 0.08);
+}
+
+.student-avatar.female {
+    color: #755900;
+    background: rgba(201, 162, 58, 0.15);
+}
+
+.student-info { flex: 1; min-width: 0; }
+
+.student-name {
+    font-weight: 700;
+    font-size: 15px;
+    color: #0B1D3A;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.student-meta {
+    font-size: 12px;
+    color: #44474D;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-top: 2px;
+}
+
+.student-meta span { display: inline-flex; align-items: center; gap: 3px; }
+.student-meta .material-symbols-outlined { font-size: 14px; }
+
+.age-badge {
+    flex-shrink: 0;
+    background: rgba(11, 29, 58, 0.06);
+    color: #0B1D3A;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 4px 10px;
+    white-space: nowrap;
+}
+
+.phone-link {
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(30, 125, 69, 0.1);
+    color: #1E7D45;
+    text-decoration: none;
+}
+
+/* ---- Toast ---- */
+.toast {
+    position: fixed;
+    bottom: 88px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: #0B1D3A;
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s, transform .25s;
+    max-width: 90%;
+    text-align: center;
+    z-index: 999;
+}
+
+.toast.error { background: #BA1A1A; }
+.toast.success { background: #1E7D45; }
+
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+@media (min-width: 768px) {
+    .toast { bottom: 24px; }
+}
+
+.delete-btn {
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(186, 26, 26, 0.08);
+    color: #BA1A1A;
+    cursor: pointer;
+    transition: background .2s;
+}
+
+.delete-btn:active {
+    background: rgba(186, 26, 26, 0.18);
+}
+
+.delete-btn .material-symbols-outlined {
+    font-size: 18px;
+}

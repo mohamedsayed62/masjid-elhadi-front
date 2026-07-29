@@ -1,0 +1,109 @@
+/* ---------------------------------------------------------------------
+   Shared with attendance.css — repeated here for a standalone page.
+   If you already load assets/css/attendance.css site-wide, you can drop
+   the rules that duplicate it and just keep the ones below marked NEW.
+--------------------------------------------------------------------- */
+
+body {
+    font-family: 'Cairo', sans-serif;
+}
+
+.islamic-pattern {
+    background-color: #F5F6F8;
+    background-image: radial-gradient(#0B1D3A0d 1px, transparent 1px);
+    background-size: 22px 22px;
+}
+
+.menu-item:hover { background-color: #F5F6F8; }
+
+.modal-backdrop { background: rgba(11, 29, 58, 0.45); backdrop-filter: blur(2px); }
+.modal-enter { animation: modalIn 0.22s ease both; }
+@keyframes modalIn {
+    from { opacity: 0; transform: translateY(16px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.fade-in { animation: fadeIn 0.35s ease both; }
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.spinner {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 3px solid #e2e2e2; border-top-color: #C9A23A;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toast {
+    position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #1a1c1c; color: #fff; padding: 12px 20px; border-radius: 999px;
+    font-size: 14px; font-weight: 700; opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease; z-index: 60; white-space: nowrap;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+}
+@media (min-width: 768px) { .toast { bottom: 24px; } }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.success { background: #1E7D45; }
+.toast.error { background: #BA1A1A; }
+.toast.warning { background: #E67E22; }
+
+/* ----------------------------- NEW ----------------------------------- */
+
+/* Subject chips */
+.subject-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #0B1D3A0d; color: #0B1D3A; font-weight: 700; font-size: 13px;
+    padding: 7px 12px; border-radius: 999px; border: 1px solid #0B1D3A1a;
+}
+.subject-chip button {
+    display: flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%; color: #BA1A1A;
+    opacity: 0.6; transition: opacity 0.15s;
+}
+.subject-chip button:hover { opacity: 1; }
+.subject-chip button .material-symbols-outlined { font-size: 15px; }
+
+.subject-input {
+    width: 100%; border: 1.5px solid #e2e2e2; border-radius: 12px;
+    padding: 12px 14px; font-family: 'Cairo', sans-serif; font-size: 14px;
+    background: #F5F6F8; transition: border-color 0.15s;
+}
+.subject-input:focus { outline: none; border-color: #C9A23A; background: #fff; }
+
+/* Student cards */
+.student-card {
+    background: #fff; border-radius: 18px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    border: 1px solid #e2e2e2; cursor: pointer; transition: transform 0.12s, box-shadow 0.12s;
+}
+.student-card:active { transform: scale(0.98); }
+.student-card:hover { box-shadow: 0 4px 14px rgba(11,29,58,0.08); }
+
+.student-card .avg-ring {
+    width: 44px; height: 44px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 12px; flex-shrink: 0;
+}
+
+/* Degree number input inside modal */
+.degree-input-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; background: #F5F6F8; border-radius: 14px; padding: 10px 12px;
+}
+.degree-input {
+    width: 80px; text-align: center; border: 1.5px solid #e2e2e2; border-radius: 10px;
+    padding: 8px 6px; font-family: 'Cairo', sans-serif; font-weight: 700; font-size: 15px;
+    background: #fff;
+}
+.degree-input:focus { outline: none; border-color: #C9A23A; }
+
+/* Top 5 leaderboard */
+.rank-badge {
+    width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-weight: 800; font-size: 13px; color: #fff; flex-shrink: 0;
+}
+.rank-1 { background: linear-gradient(135deg, #C9A23A, #E9C766); }
+.rank-2 { background: linear-gradient(135deg, #9AA5B1, #C7CFD6); }
+.rank-3 { background: linear-gradient(135deg, #B5651D, #D68B4C); }
+.rank-other { background: #0B1D3A; }

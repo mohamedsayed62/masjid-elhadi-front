@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>الطلبة - مسجد الهدي النبوي</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="assets/css/students.css"/>
+<script>
+tailwind.config = {
+    darkMode: "class",
+    theme: {
+        extend: {
+            colors: {
+                "primary": "#0B1D3A",
+                "primary-container": "#0b1d3a",
+                "on-primary": "#ffffff",
+                "secondary": "#C9A23A",
+                "secondary-container": "#fdd265",
+                "on-secondary-container": "#755900",
+                "surface": "#F5F6F8",
+                "surface-container": "#FFFFFF",
+                "surface-container-low": "#f3f3f4",
+                "surface-container-highest": "#e2e2e2",
+                "on-surface": "#1a1c1c",
+                "on-surface-variant": "#44474d",
+                "outline-variant": "#e2e2e2",
+                "error": "#BA1A1A",
+                "error-container": "#ffdad6",
+                "success": "#1E7D45",
+                "success-container": "#d4f5dd",
+                "warning": "#E67E22",
+                "warning-container": "#ffedd5",
+            },
+            fontFamily: { "body": ["Cairo", "sans-serif"] },
+            fontSize: {
+                "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }],
+                "body-lg": ["16px", { lineHeight: "24px", fontWeight: "400" }],
+                "headline-md": ["20px", { lineHeight: "28px", fontWeight: "700" }],
+                "headline-lg": ["24px", { lineHeight: "32px", fontWeight: "700" }],
+                "headline-xl": ["28px", { lineHeight: "36px", fontWeight: "800" }],
+                "label-bold": ["12px", { lineHeight: "16px", fontWeight: "700" }],
+            },
+        }
+    }
+}
+</script>
+</head>
+<body class="text-on-surface antialiased min-h-screen islamic-pattern flex flex-col md:flex-row relative pb-20 md:pb-0">
+
+<!-- Top App Bar (Mobile) -->
+<header class="md:hidden bg-surface-container flex justify-between items-center px-4 py-3 w-full sticky top-0 shadow-sm z-40">
+    <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
+            <span class="material-symbols-outlined text-primary text-2xl">group</span>
+        </div>
+        <div>
+            <h1 class="text-headline-md font-bold text-primary leading-tight">الطلبة</h1>
+            <p class="text-xs text-on-surface-variant leading-tight" id="headerSubtitle">—</p>
+        </div>
+    </div>
+    <button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface transition-colors" id="refreshBtnMobile" title="تحديث">
+        <span class="material-symbols-outlined text-on-surface-variant">refresh</span>
+    </button>
+</header>
+
+
+<!-- SideNav Desktop -->
+<nav class="hidden md:flex flex-col bg-surface-container shadow-xl h-screen w-72 rounded-r-xl py-4 z-50 sticky top-0">
+    <div class="px-6 mb-8 flex items-center gap-4">
+        <div class="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center border-2 border-secondary">
+            <span class="material-symbols-outlined text-primary text-3xl">person</span>
+        </div>
+        <div>
+            <h2 class="text-headline-md font-bold text-primary" id="sideName">—</h2>
+            <p class="text-body-md text-on-surface-variant">محفظ</p>
+            <p class="text-label-bold text-secondary mt-1">مسجد الهدي النبوي</p>
+        </div>
+    </div>
+    <div class="flex-1 overflow-y-auto px-2 space-y-2">
+        <a class="menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="dashboard.html">
+            <span class="material-symbols-outlined">dashboard</span>لوحة التحكم
+        </a>
+        <a class="menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="attendance.html">
+            <span class="material-symbols-outlined">how_to_reg</span>الحضور
+        </a>
+        <a class="flex items-center gap-3 bg-secondary-container text-on-secondary-container rounded-lg mx-2 px-4 py-3 font-bold" href="students.html">
+            <span class="material-symbols-outlined">group</span>الطلبة
+        </a>
+        <a class="menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="tests.html">
+            <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">grading</span>التقييمات
+        </a>
+        <a class="menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="reports.html">
+            <span class="material-symbols-outlined">assessment</span>التقارير
+        </a>
+    </div>
+</nav>
+
+<!-- Main Content -->
+<main class="flex-1 flex flex-col w-full max-w-5xl mx-auto px-4 md:px-8 py-6 min-h-screen">
+
+    <!-- Page header (desktop) -->
+    <section class="hidden md:flex items-center justify-between mb-6 fade-in">
+        <div>
+            <h2 class="text-headline-lg text-primary font-bold">الطلبة</h2>
+            <p class="text-body-md text-on-surface-variant mt-1" id="countSubtitle">—</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="refreshBtnDesktop" class="w-11 h-11 flex items-center justify-center rounded-full bg-surface-container border border-outline-variant hover:bg-surface transition-colors" title="تحديث">
+                <span class="material-symbols-outlined text-primary">refresh</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- Search -->
+    <section class="mb-4 fade-in" id="searchSection">
+        <div class="search-shell">
+            <span class="material-symbols-outlined text-on-surface-variant">search</span>
+            <input id="searchInput" type="text" placeholder="ابحث باسم الطالب أو ولي الأمر..." />
+        </div>
+    </section>
+
+    <!-- Loading state -->
+    <section id="loadingState" class="flex-1 flex flex-col gap-3">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+    </section>
+
+    <!-- Error state -->
+    <section id="errorState" class="hidden flex-1 flex items-center justify-center">
+        <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
+            <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-error/10 mb-4">
+                <span class="material-symbols-outlined text-error text-4xl">error_outline</span>
+            </div>
+            <h3 class="text-headline-md text-primary font-bold mb-2">تعذر تحميل بيانات الطلبة</h3>
+            <p class="text-body-md text-on-surface-variant mb-5" id="errorMessage">حدث خطأ غير متوقع، حاول مرة أخرى.</p>
+            <button onclick="location.href=`add-student.html`" id="retryBtn" class="bg-secondary text-white px-6 py-3 rounded-xl font-bold shadow-md active:scale-95 transition-transform inline-flex items-center gap-2">
+                <span class="material-symbols-outlined">add</span>
+                إضافة طالب جديد
+            </button>
+        </div>
+    </section>
+
+    <!-- No active wallet state -->
+    <section id="noWalletState" class="hidden flex-1 flex items-center justify-center">
+        <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
+            <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-error/10 mb-4">
+                <span class="material-symbols-outlined text-error text-4xl">warning</span>
+            </div>
+            <h3 class="text-headline-md text-primary font-bold mb-2">لا يوجد محفظ نشط</h3>
+            <p class="text-body-md text-on-surface-variant mb-5">يرجى تسجيل الدخول أولاً لعرض بيانات الطلبة</p>
+            <button onclick="location.href='index.html'" class="bg-secondary text-white px-6 py-3 rounded-xl font-bold shadow-md active:scale-95 transition-transform inline-flex items-center gap-2">
+                <span class="material-symbols-outlined">login</span>
+                تسجيل الدخول
+            </button>
+        </div>
+    </section>
+
+    <!-- Empty state (no students yet) -->
+    <section id="emptyState" class="hidden flex-1 flex items-center justify-center">
+        <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
+            <div class="empty-float inline-flex items-center justify-center w-24 h-24 rounded-full bg-secondary/10 mb-4">
+                <span class="material-symbols-outlined text-secondary text-5xl">school</span>
+            </div>
+            <h3 class="text-headline-md text-primary font-bold mb-2">لا يوجد طلبة بعد</h3>
+            <p class="text-body-md text-on-surface-variant">لم تتم إضافة أي طالب لهذا المحفظ حتى الآن.</p>
+        </div>
+    </section>
+
+    <!-- No search results -->
+    <section id="noResultsState" class="hidden flex-1 flex items-center justify-center">
+        <div class="text-center py-10">
+            <span class="material-symbols-outlined text-4xl text-outline-variant">search_off</span>
+            <p class="text-body-md text-on-surface-variant mt-2">لا توجد نتائج مطابقة للبحث</p>
+        </div>
+    </section>
+
+    <!-- Students list -->
+    <section id="studentsList" class="hidden flex-1 flex flex-col gap-3 fade-in"></section>
+
+</main>
+
+<!-- Bottom Nav (Mobile) -->
+<nav class="md:hidden bg-surface-container flex justify-around items-center px-2 py-2 rounded-t-xl border-t border-outline-variant shadow-lg fixed bottom-0 left-0 w-full z-50">
+    <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="dashboard.html">
+        <span class="material-symbols-outlined mb-1">home</span>
+        <span class="text-label-bold">الرئيسية</span>
+    </a>
+    <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="attendance.html">
+        <span class="material-symbols-outlined mb-1">calendar_today</span>
+        <span class="text-label-bold">الحضور</span>
+    </a>
+    <a class="flex flex-col items-center justify-center text-secondary font-bold scale-95 w-16 h-14" href="students.html">
+        <span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">group</span>
+        <span class="text-label-bold">الطلبة</span>
+    </a>
+    <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="reports.html">
+        <span class="material-symbols-outlined mb-1">analytics</span>
+        <span class="text-label-bold">التقارير</span>
+    </a>
+</nav>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Delete Confirm Dialog -->
+<div id="deleteOverlay" class="hidden fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-4">
+    <div class="bg-surface-container rounded-2xl p-6 w-full max-w-sm shadow-xl">
+        <div class="flex flex-col items-center text-center gap-3">
+            <div class="w-16 h-16 rounded-full bg-error/10 flex items-center justify-center">
+                <span class="material-symbols-outlined text-error text-3xl">delete_forever</span>
+            </div>
+            <h3 class="text-headline-md text-primary font-bold">حذف الطالب</h3>
+            <p class="text-body-md text-on-surface-variant">هل أنت متأكد من حذف <span id="deleteStudentName" class="font-bold text-primary"></span>؟ لا يمكن التراجع عن هذا الإجراء.</p>
+        </div>
+        <div class="flex gap-3 mt-6">
+            <button id="cancelDeleteBtn" class="flex-1 py-3 rounded-xl border border-outline-variant text-on-surface-variant font-bold text-sm">
+                إلغاء
+            </button>
+            <button id="confirmDeleteBtn" class="flex-1 py-3 rounded-xl bg-error text-white font-bold text-sm flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined text-base">delete</span>
+                حذف
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Student Dialog -->
+<div id="editOverlay" class="hidden fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-4">
+    <div class="bg-surface-container rounded-2xl p-6 w-full max-w-sm shadow-xl max-h-[90vh] overflow-y-auto">
+        <div class="flex flex-col items-center text-center gap-2 mb-4">
+            <div class="w-16 h-16 rounded-full bg-secondary/10 flex items-center justify-center">
+                <span class="material-symbols-outlined text-secondary text-3xl">edit</span>
+            </div>
+            <h3 class="text-headline-md text-primary font-bold">تعديل بيانات الطالب</h3>
+        </div>
+
+        <form id="editForm" class="flex flex-col gap-4">
+            <input type="hidden" id="editId">
+
+            <label class="flex flex-col gap-1">
+                <span class="text-label-bold text-on-surface-variant">الاسم</span>
+                <input id="editName" type="text" required
+                    class="w-full rounded-xl border border-outline-variant px-4 py-3 text-body-md focus:outline-none focus:ring-2 focus:ring-secondary" />
+            </label>
+
+            <label class="flex flex-col gap-1">
+                <span class="text-label-bold text-on-surface-variant">اسم ولي الأمر</span>
+                <input id="editParentName" type="text"
+                    class="w-full rounded-xl border border-outline-variant px-4 py-3 text-body-md focus:outline-none focus:ring-2 focus:ring-secondary" />
+            </label>
+
+            <label class="flex flex-col gap-1">
+                <span class="text-label-bold text-on-surface-variant">رقم الهاتف</span>
+                <input id="editPhone" type="tel"
+                    class="w-full rounded-xl border border-outline-variant px-4 py-3 text-body-md focus:outline-none focus:ring-2 focus:ring-secondary" />
+            </label>
+
+            <div class="flex gap-3">
+                <label class="flex flex-col gap-1 flex-1">
+                    <span class="text-label-bold text-on-surface-variant">العمر</span>
+                    <input id="editAge" type="number" min="0"
+                        class="w-full rounded-xl border border-outline-variant px-4 py-3 text-body-md focus:outline-none focus:ring-2 focus:ring-secondary" />
+                </label>
+
+                <label class="flex flex-col gap-1 flex-1">
+                    <span class="text-label-bold text-on-surface-variant">الجنس</span>
+                    <select id="editGender"
+                        class="w-full rounded-xl border border-outline-variant px-4 py-3 text-body-md focus:outline-none focus:ring-2 focus:ring-secondary">
+                        <option value="">—</option>
+                        <option value="ذكر">ذكر</option>
+                        <option value="أنثى">أنثى</option>
+                    </select>
+                </label>
+            </div>
+
+            <p id="editLoading" class="hidden text-body-md text-on-surface-variant text-center">جارِ التحميل...</p>
+
+            <div class="flex gap-3 mt-2">
+                <button type="button" id="cancelEditBtn" class="flex-1 py-3 rounded-xl border border-outline-variant text-on-surface-variant font-bold text-sm">
+                    إلغاء
+                </button>
+                <button type="submit" id="confirmEditBtn" class="flex-1 py-3 rounded-xl bg-secondary text-white font-bold text-sm flex items-center justify-center gap-2">
+                    <span class="material-symbols-outlined text-base">save</span>
+                    حفظ
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<button onclick="location.href='add-student.html'" class="fixed bottom-24 left-4 md:bottom-6 md:left-8 w-14 h-14 bg-secondary text-white rounded-full shadow-lg flex items-center justify-center z-40 active:scale-95 transition-transform" title="إضافة طالب">
+    <span class="material-symbols-outlined text-2xl">person_add</span>
+</button>
+
+<script src="assets/js/students.js"></script>
+</body>
+</html>

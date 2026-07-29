@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>إدخال بيانات المحفظ - مسجد الهدي النبوي</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+<div class="mobile-container">
+  <main>
+
+    <!-- Loading state: shown briefly while we check if a user id exists and fetch their data -->
+    <div class="header fade-in" id="checkingState">
+      <div class="logo-wrap">
+        <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+      </div>
+      <p class="subtitle">جاري التحقق من بياناتك...</p>
+    </div>
+
+    <!-- Returning user state: shown when we found an id in localStorage and fetched the user successfully -->
+    <div class="header fade-in hidden" id="welcomeState">
+      <div class="logo-wrap">
+        <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+      </div>
+      <h1 id="welcomeName">مرحباً بك</h1>
+      <p class="subtitle">تم تسجيل دخولك مسبقاً</p>
+      <button type="button" class="btn-primary" id="continueBtn">
+        <span id="continueLabel">المتابعة إلى لوحة التحكم</span>
+      </button>
+      <button type="button" class="btn-secondary" id="logoutBtn">تسجيل الخروج</button>
+    </div>
+
+    <!-- First-time / logged-out state: the registration form -->
+    <div id="formState" class="hidden">
+      <div class="header fade-in">
+        <div class="logo-wrap">
+          <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+        </div>
+        <h1>مرحباً بك</h1>
+        <p class="subtitle">يرجى إدخال بياناتك لبدء استخدام التطبيق</p>
+      </div>
+
+      <form id="walletForm" class="fade-in" novalidate>
+        <div class="field-group">
+          <label for="sessionName">اسم المحفظ</label>
+          <div class="input-shell" id="nameShell">
+            <input id="sessionName" type="text" placeholder="أدخل اسم المحفظ" autocomplete="off" />
+          </div>
+          <span class="error-text" id="nameError">يرجى إدخال اسم المحفظ</span>
+        </div>
+
+        <div class="field-group">
+          <label for="startDate">تاريخ بداية الدورة</label>
+          <div class="input-shell" id="dateShell">
+            <input id="startDate" type="date" />
+            <span class="icon">📅</span>
+          </div>
+          <span class="error-text" id="dateError">يرجى اختيار تاريخ صحيح</span>
+        </div>
+
+        <button type="submit" class="btn-primary" id="saveBtn">
+          <span class="spinner" id="btnSpinner"></span>
+          <span id="btnLabel">حفظ وبدء الاستخدام</span>
+        </button>
+      </form>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="assets/js/main.js"></script>
+</body>
+</html>
