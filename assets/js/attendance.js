@@ -37,7 +37,6 @@
     let currentUserName = '';
     let students = [];
     let selectedDate = '';
-    let sessionName = '';
     let records = {};
     let existingDayRecords = {};
     let confirmCallback = null;
@@ -260,11 +259,6 @@
                 </div>` : ''}
             </section>
 
-            <section class="bg-surface-container rounded-2xl p-5 shadow-sm mb-4 fade-in" style="animation-delay: 0.1s">
-                <label class="text-label-bold text-on-surface-variant mb-2 block">اسم الجلسة (اختياري)</label>
-                <input type="text" id="sessionNameInput" class="date-input" placeholder="مثال: حلقة تحفيظ صباحية" value="${escapeHtml(sessionName)}"/>
-            </section>
-
             <section class="bg-surface-container rounded-2xl p-4 shadow-sm mb-4 fade-in" style="animation-delay: 0.15s">
                 <div class="grid grid-cols-5 gap-2 text-center">
                     <div><div class="text-xl font-bold text-success">${stats.present}</div><div class="text-[10px] text-on-surface-variant font-bold">حاضر</div></div>
@@ -396,10 +390,7 @@
                 handleDateChange(d);
             });
         });
-
-        const sessionInput = document.getElementById('sessionNameInput');
-        sessionInput.addEventListener('input', (e) => { sessionName = e.target.value; });
-
+        
         document.querySelectorAll('.status-btn[data-student]').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const sid = btn.dataset.student;
