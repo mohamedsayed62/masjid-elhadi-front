@@ -2,7 +2,7 @@
   // =====================================================================
   // CONFIG — replace with your real API base URL and endpoints
   // =====================================================================
-  const API_BASE_URL = 'https://masjid-nodejs-production.up.railway.app/api'; // TODO: set real base URL
+  const API_BASE_URL = 'https://masjid-nodejs-production.up.railway.app/api';
   const LOGIN_ENDPOINT = `${API_BASE_URL}/users/admin`; // TODO: confirm real admin login route
   const VERIFY_ENDPOINT = `${API_BASE_URL}/users/admin`;    // TODO: confirm real "who am I" route (auth'd via Bearer token)
 
