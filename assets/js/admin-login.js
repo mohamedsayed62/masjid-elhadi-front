@@ -96,6 +96,7 @@
     if (!res.ok || json.status !== 'success' || !json.data || !json.data.token) {
       throw new Error(json.message || 'تعذر تسجيل الدخول');
     }
+    localStorage.removeItem('active_user_id'); 
 
     return json.data; // { _id, name, role, __v, token }
   }
