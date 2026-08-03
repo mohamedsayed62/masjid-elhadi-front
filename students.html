@@ -197,10 +197,6 @@ tailwind.config = {
 
 <!-- Bottom Nav (Mobile) -->
 <nav class="md:hidden bg-surface-container flex justify-around items-center px-2 py-2 rounded-t-xl border-t border-outline-variant shadow-lg fixed bottom-0 left-0 w-full z-50">
-    <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="dashboard.html">
-        <span class="material-symbols-outlined mb-1">home</span>
-        <span class="text-label-bold">الرئيسية</span>
-    </a>
     <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="attendance.html">
         <span class="material-symbols-outlined mb-1">calendar_today</span>
         <span class="text-label-bold">الحضور</span>
@@ -209,9 +205,11 @@ tailwind.config = {
         <span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">group</span>
         <span class="text-label-bold">الطلبة</span>
     </a>
+    <a class="flex flex-col items-center justify-center text-on-surface-variant font-bold scale-95 w-16 h-14" href="tests.html">
+        <span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">grading</span><span class="text-label-bold">التقييمات</span>
+    </a>
     <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="reports.html">
-        <span class="material-symbols-outlined mb-1">analytics</span>
-        <span class="text-label-bold">التقارير</span>
+        <span class="material-symbols-outlined mb-1">analytics</span><span class="text-label-bold">التقارير</span>
     </a>
 </nav>
 
