@@ -151,7 +151,7 @@
   // Events — returning admin screen
   // =====================================================================
   continueBtn.addEventListener('click', () => {
-    window.location.href = 'admin-dashboard.html';
+    window.location.href = 'students.html';
   });
 
   logoutBtn.addEventListener('click', () => {
@@ -202,7 +202,7 @@
 
       showToast('تم تسجيل الدخول بنجاح', 'success');
       setTimeout(() => {
-        window.location.href = 'admin-dashboard.html';
+        window.location.href = 'students.html';
       }, 900);
     } catch (err) {
       showToast(err.message || 'حدث خطأ أثناء تسجيل الدخول', 'error');
