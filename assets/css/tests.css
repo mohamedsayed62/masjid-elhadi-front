@@ -38,6 +38,7 @@ body {
 
 .toast {
     position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%) translateY(20px);
+    z-index: 1000;
     background: #1a1c1c; color: #fff; padding: 12px 20px; border-radius: 999px;
     font-size: 14px; font-weight: 700; opacity: 0; pointer-events: none;
     transition: opacity 0.25s ease, transform 0.25s ease; z-index: 60; white-space: nowrap;

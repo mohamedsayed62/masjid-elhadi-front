@@ -207,3 +207,19 @@ body {
 .delete-btn .material-symbols-outlined {
     font-size: 18px;
 }
+
+.admin-user-chip {
+    padding: 6px 14px;
+    border-radius: 9999px;
+    border: 1px solid var(--tw-color-outline-variant, #e2e2e2);
+    background: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .15s;
+}
+.admin-user-chip.active {
+    background: #0B1D3A;
+    color: #fff;
+    border-color: #0B1D3A;
+}
