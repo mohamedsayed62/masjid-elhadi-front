@@ -80,6 +80,9 @@ tailwind.config = {
         </div>
     </div>
     <div class="flex-1 overflow-y-auto px-2 space-y-2">
+        <a class="menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="dashboard.html">
+            <span class="material-symbols-outlined">dashboard</span>لوحة التحكم
+        </a>
         <a class="menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="attendance.html">
             <span class="material-symbols-outlined">how_to_reg</span>الحضور
         </a>
@@ -119,6 +122,11 @@ tailwind.config = {
         </div>
     </section>
 
+    <section id="adminPanel" class="hidden mb-4 fade-in bg-surface-container rounded-2xl p-4 shadow-sm">
+        <h3 class="text-body-md font-bold text-primary mb-3">اختر محفظاً لعرض طلبته</h3>
+        <div id="adminUsersList" class="flex flex-wrap gap-2"></div>
+    </section>
+
     <!-- Loading state -->
     <section id="loadingState" class="flex-1 flex flex-col gap-3">
         <div class="skeleton-card"></div>
@@ -156,6 +164,16 @@ tailwind.config = {
         </div>
     </section>
 
+    <section id="selectMentorState" class="hidden flex-1 flex items-center justify-center">
+        <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
+            <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-secondary/10 mb-4">
+                <span class="material-symbols-outlined text-secondary text-4xl">supervisor_account</span>
+            </div>
+            <h3 class="text-headline-md text-primary font-bold mb-2">اختر محفظاً</h3>
+            <p class="text-body-md text-on-surface-variant">اختر أحد المحفظين من القائمة أعلاه لعرض طلبته.</p>
+        </div>
+    </section>
+
     <!-- Empty state (no students yet) -->
     <section id="emptyState" class="hidden flex-1 flex items-center justify-center">
         <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
@@ -182,6 +200,10 @@ tailwind.config = {
 
 <!-- Bottom Nav (Mobile) -->
 <nav class="md:hidden bg-surface-container flex justify-around items-center px-2 py-2 rounded-t-xl border-t border-outline-variant shadow-lg fixed bottom-0 left-0 w-full z-50">
+    <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="dashboard.html">
+        <span class="material-symbols-outlined mb-1">home</span>
+        <span class="text-label-bold">الرئيسية</span>
+    </a>
     <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="attendance.html">
         <span class="material-symbols-outlined mb-1">calendar_today</span>
         <span class="text-label-bold">الحضور</span>
@@ -189,9 +211,6 @@ tailwind.config = {
     <a class="flex flex-col items-center justify-center text-secondary font-bold scale-95 w-16 h-14" href="students.html">
         <span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">group</span>
         <span class="text-label-bold">الطلبة</span>
-    </a>
-    <a class="flex flex-col items-center justify-center text-on-surface-variant font-bold scale-95 w-16 h-14" href="tests.html">
-        <span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">grading</span><span class="text-label-bold">التقييمات</span>
     </a>
     <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="reports.html">
         <span class="material-symbols-outlined mb-1">analytics</span>
@@ -288,7 +307,35 @@ tailwind.config = {
     </div>
 </div>
 
-<button onclick="location.href='add-student.html'" class="fixed bottom-24 left-4 md:bottom-6 md:left-8 w-14 h-14 bg-secondary text-white rounded-full shadow-lg flex items-center justify-center z-40 active:scale-95 transition-transform" title="إضافة طالب">
+<div id="moveOverlay" class="hidden fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-4">
+    <div class="bg-surface-container rounded-2xl p-6 w-full max-w-sm shadow-xl">
+        <div class="flex flex-col items-center text-center gap-2 mb-4">
+            <div class="w-16 h-16 rounded-full bg-secondary/10 flex items-center justify-center">
+                <span class="material-symbols-outlined text-secondary text-3xl">move_up</span>
+            </div>
+            <h3 class="text-headline-md text-primary font-bold">نقل الطالب</h3>
+            <p class="text-body-md text-on-surface-variant">
+                نقل <span id="moveStudentName" class="font-bold text-primary"></span> إلى محفظ آخر
+            </p>
+        </div>
+
+        <select id="moveTargetSelect"
+            class="w-full rounded-xl border border-outline-variant px-4 py-3 text-body-md mb-4 focus:outline-none focus:ring-2 focus:ring-secondary">
+        </select>
+
+        <div class="flex gap-3">
+            <button type="button" id="cancelMoveBtn" class="flex-1 py-3 rounded-xl border border-outline-variant text-on-surface-variant font-bold text-sm">
+                إلغاء
+            </button>
+            <button type="button" id="confirmMoveBtn" class="flex-1 py-3 rounded-xl bg-secondary text-white font-bold text-sm flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined text-base">move_up</span>
+                نقل
+            </button>
+        </div>
+    </div>
+</div>
+
+<button id="addStudentBtn" class="fixed bottom-24 left-4 md:bottom-6 md:left-8 w-14 h-14 bg-secondary text-white rounded-full shadow-lg flex items-center justify-center z-40 active:scale-95 transition-transform" title="إضافة طالب">
     <span class="material-symbols-outlined text-2xl">person_add</span>
 </button>
 

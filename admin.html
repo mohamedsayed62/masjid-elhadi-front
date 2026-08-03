@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>تسجيل دخول المشرف - مسجد الهدي النبوي</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+<div class="mobile-container">
+  <main>
+
+    <!-- Loading state: shown briefly while we check if a token exists and verify it -->
+    <div class="header fade-in" id="checkingState">
+      <div class="logo-wrap">
+        <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+      </div>
+      <p class="subtitle">جاري التحقق من جلستك...</p>
+    </div>
+
+    <!-- Returning admin state: shown when a valid token was found -->
+    <div class="header fade-in hidden" id="welcomeState">
+      <div class="logo-wrap">
+        <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+      </div>
+      <h1 id="welcomeName">مرحباً بك</h1>
+      <p class="subtitle">تم تسجيل دخولك مسبقاً</p>
+      <button type="button" class="btn-primary" id="continueBtn">
+        <span id="continueLabel">المتابعة إلى لوحة التحكم</span>
+      </button>
+      <button type="button" class="btn-secondary" id="logoutBtn">تسجيل الخروج</button>
+    </div>
+
+    <!-- Login form state -->
+    <div id="formState" class="hidden">
+      <div class="header fade-in">
+        <div class="logo-wrap">
+          <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+        </div>
+        <h1>تسجيل دخول المشرف</h1>
+        <p class="subtitle">يرجى إدخال بيانات الدخول الخاصة بك</p>
+      </div>
+
+      <form id="loginForm" class="fade-in" novalidate>
+        <div class="field-group">
+          <label for="adminName">اسم المستخدم</label>
+          <div class="input-shell" id="nameShell">
+            <input id="adminName" type="text" placeholder="أدخل اسم المستخدم" autocomplete="username" />
+          </div>
+          <span class="error-text" id="nameError">يرجى إدخال اسم المستخدم</span>
+        </div>
+
+        <div class="field-group">
+          <label for="adminPassword">كلمة المرور</label>
+          <div class="input-shell" id="passwordShell">
+            <input id="adminPassword" type="password" placeholder="أدخل كلمة المرور" autocomplete="current-password" />
+          </div>
+          <span class="error-text" id="passwordError">يرجى إدخال كلمة المرور</span>
+        </div>
+
+        <button type="submit" class="btn-primary" id="saveBtn">
+          <span class="spinner" id="btnSpinner"></span>
+          <span id="btnLabel">تسجيل الدخول</span>
+        </button>
+      </form>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="assets/js/admin-login.js"></script>
+</body>
+</html>
