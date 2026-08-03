@@ -20,9 +20,23 @@
     // router expects something different (e.g. PATCH vs PUT).
     const UPDATE_STUDENT_ENDPOINT = `${API_BASE_URL}/students`;
 
+    // Move-to-another-محفظ handler: POST /students/editUser, requires an
+    // Authorization: Bearer <admin token> header, body: { id, userId }.
+    // Confirmed response shape: { status, message, code, data: { _id, userId, ... } }.
+    const MOVE_STUDENT_ENDPOINT = `${API_BASE_URL}/students/editUser`;
+
+    // NEW — admin: list all محفظين (wallet holders / mentors).
+    // TODO: confirm the real route; from your sample it's
+    // GET /api/users/admin/getUsers with an Authorization: Bearer <token> header.
+    const ADMIN_USERS_ENDPOINT = `${API_BASE_URL}/users/admin/getUsers`;
+
     // Only the id is ever read from localStorage — same key the login
     // screen writes. Nothing about the students themselves is cached.
     const ACTIVE_USER_ID_KEY = 'active_user_id';
+
+    // NEW — the key an admin's auth token is expected to be stored under.
+    // TODO: confirm this matches whatever key your admin login screen writes.
+    const ADMIN_TOKEN_KEY = 'admin_token';
 
     // =====================================================================
     // DOM references
@@ -41,10 +55,19 @@
     const noResultsState = document.getElementById('noResultsState');
     const studentsList = document.getElementById('studentsList');
 
+    // NEW — admin panel + select-a-محفظ prompt
+    const adminPanel = document.getElementById('adminPanel');
+    const adminUsersListEl = document.getElementById('adminUsersList');
+    const selectMentorState = document.getElementById('selectMentorState');
+
     const retryBtn = document.getElementById('retryBtn');
     const refreshBtnDesktop = document.getElementById('refreshBtnDesktop');
     const refreshBtnMobile = document.getElementById('refreshBtnMobile');
     const toast = document.getElementById('toast');
+
+    // NEW — the floating "add student" button. Give it id="addStudentBtn"
+    // in the HTML and drop its old inline onclick="location.href=...".
+    const addStudentBtn = document.getElementById('addStudentBtn');
 
     const deleteOverlay     = document.getElementById('deleteOverlay');
     const deleteStudentName = document.getElementById('deleteStudentName');
@@ -53,9 +76,6 @@
     let pendingDeleteId = null;
 
     // --- Edit dialog DOM refs -------------------------------------------
-    // NOTE: these elements don't exist in the HTML you shared yet.
-    // See the markup snippet at the end of this file — add it next to
-    // your delete overlay markup.
     const editOverlay      = document.getElementById('editOverlay');
     const editForm          = document.getElementById('editForm');
     const editIdInput       = document.getElementById('editId');
@@ -66,9 +86,19 @@
     const editGenderSelect  = document.getElementById('editGender');
     const cancelEditBtn     = document.getElementById('cancelEditBtn');
     const confirmEditBtn    = document.getElementById('confirmEditBtn');
-    const editLoading       = document.getElementById('editLoading'); // optional spinner over the form
+    const editLoading       = document.getElementById('editLoading');
+
+    // --- Move dialog DOM refs ---------------------------------------------
+    const moveOverlay       = document.getElementById('moveOverlay');
+    const moveStudentNameEl = document.getElementById('moveStudentName');
+    const moveTargetSelect  = document.getElementById('moveTargetSelect');
+    const cancelMoveBtn     = document.getElementById('cancelMoveBtn');
+    const confirmMoveBtn    = document.getElementById('confirmMoveBtn');
+    let pendingMoveId = null;
 
     let allStudents = [];
+    let adminUsers = [];       // list of محفظين, only populated in admin mode
+    let viewingUserId = null;  // the محفظ currently selected by the admin
 
     // =====================================================================
     // Helpers
@@ -92,7 +122,7 @@
     }
 
     function showOnly(...visibleSections) {
-        const all = [loadingState, errorState, noWalletState, emptyState, noResultsState, studentsList];
+        const all = [loadingState, errorState, noWalletState, selectMentorState, emptyState, noResultsState, studentsList];
         all.forEach((section) => {
             if (section) section.classList.toggle('hidden', !visibleSections.includes(section));
         });
@@ -102,11 +132,48 @@
         return localStorage.getItem(ACTIVE_USER_ID_KEY);
     }
 
+    // NEW — admin helpers
+    function getAdminToken() {
+        return localStorage.getItem(ADMIN_TOKEN_KEY);
+    }
+
+    function isAdminMode() {
+        return !!getAdminToken();
+    }
+
+    // The id whose students we should actually be fetching: an admin's
+    // selected محفظ takes priority over the device's own active wallet.
+    function getEffectiveUserId() {
+        return viewingUserId || getActiveUserId();
+    }
+
+    // NEW — the "add student" page has no localStorage access to an
+    // admin's own wallet (it doesn't have one), so pass the currently
+    // selected محفظ along explicitly via the URL.
+    function buildAddStudentUrl() {
+        const userId = getEffectiveUserId();
+        return userId ? `add-student.html?userId=${encodeURIComponent(userId)}` : 'add-student.html';
+    }
+
+    // NEW — same idea for editing: carry both the studentId and the
+    // owning محفظ's userId, so add-student.js's edit mode has a fallback
+    // if the student fetch itself doesn't resolve an owner.
+    function buildEditStudentUrl(studentId) {
+        const userId = getEffectiveUserId();
+        const params = new URLSearchParams({ id: studentId });
+        if (userId) params.set('userId', userId);
+        return `add-student.html?${params.toString()}`;
+    }
+
+    if (addStudentBtn) {
+        addStudentBtn.addEventListener('click', () => {
+            location.href = buildAddStudentUrl();
+        });
+    }
+
     // =====================================================================
     // API calls
     // =====================================================================
-    // Handles the response shape:
-    // { status: "success", message: "...", code: 200, data: [ {student...} ] }
     async function fetchStudents(userId) {
         const res = await fetch(STUDENTS_ENDPOINT(userId));
         let json;
@@ -120,13 +187,14 @@
             throw new Error(json.message || 'تعذر جلب بيانات الطلبة');
         }
 
-        // data is an array of student records
         return Array.isArray(json.data) ? json.data : [];
     }
 
-    // Matches getStudent: GET /students/:id -> { status, message, code, data: {student} }
     async function fetchStudentById(studentId) {
-        const res = await fetch(STUDENT_BY_ID_ENDPOINT(studentId));
+        const token = getAdminToken();
+        const res = await fetch(STUDENT_BY_ID_ENDPOINT(studentId), {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         let json;
         try {
             json = await res.json();
@@ -141,11 +209,31 @@
         return json.data;
     }
 
-    // Matches updateStudent: id must be in the BODY (req.body.id), since the
-    // handler does findOneAndUpdate({ _id: req.body.id }, { ...req.body }).
-    // Whatever keys you send become the $set-style overwrite fields here
-    // (it's a plain object merge via ...req.body, not $set, so make sure
-    // you send the full set of fields you want to keep).
+    // NEW — click-on-student fetch, routed by whether an admin token exists:
+    //   - admin token found  -> GET /students/:id directly (authenticated)
+    //   - no admin token     -> no direct-by-id access; pull the student out
+    //                           of the user-scoped GET /students/:userId list
+    // TODO: confirm whether STUDENT_BY_ID_ENDPOINT actually requires an
+    // admin token on your backend, or if it's open to any caller — if it's
+    // open, the "no token" branch below could just call fetchStudentById too.
+    async function fetchStudentDetails(studentId) {
+        if (getAdminToken()) {
+            return fetchStudentById(studentId);
+        }
+
+        const userId = getEffectiveUserId();
+        if (!userId) {
+            throw new Error('لا يوجد محفظ نشط');
+        }
+
+        const students = await fetchStudents(userId);
+        const found = students.find((s) => s._id === studentId);
+        if (!found) {
+            throw new Error('تعذر العثور على بيانات الطالب');
+        }
+        return found;
+    }
+
     async function updateStudentRequest(payload) {
         const res = await fetch(UPDATE_STUDENT_ENDPOINT, {
             method: 'PUT', // change to 'PATCH' if that's what your router expects
@@ -167,11 +255,59 @@
         return json.data;
     }
 
+    // NEW — move a student to another محفظ:
+    // POST /students/editUser, Authorization: Bearer <admin token>,
+    // body: { id: studentId, userId: targetUserId }.
+    // Confirmed response: { status: 'success', message, code, data: { ...student } }
+    async function moveStudentRequest(studentId, targetUserId) {
+        const token = getAdminToken();
+        const res = await fetch(MOVE_STUDENT_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ id: studentId, userId: targetUserId }),
+        });
+
+        let json;
+        try {
+            json = await res.json();
+        } catch (e) {
+            throw new Error('استجابة غير صالحة من الخادم');
+        }
+
+        if (!res.ok || json.status !== 'success') {
+            throw new Error(json.message || 'تعذر نقل الطالب');
+        }
+
+        return json.data;
+    }
+
+    // NEW — GET /users/admin/getUsers with Authorization: Bearer <token>
+    async function fetchAdminUsers() {
+        const token = getAdminToken();
+        const res = await fetch(ADMIN_USERS_ENDPOINT, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+
+        let json;
+        try {
+            json = await res.json();
+        } catch (e) {
+            throw new Error('استجابة غير صالحة من الخادم');
+        }
+
+        if (!res.ok || json.status !== 'success') {
+            throw new Error(json.message || 'تعذر جلب قائمة المحفظين');
+        }
+
+        return Array.isArray(json.data) ? json.data : [];
+    }
+
     // =====================================================================
     // Delete dialog
     // =====================================================================
-    let pendingDeleteId2 = null; // (kept name distinct, see original pendingDeleteId above)
-
     function openDeleteDialog(studentId, studentName) {
         pendingDeleteId = studentId;
         deleteStudentName.textContent = studentName;
@@ -243,9 +379,7 @@
         if (editLoading) editLoading.classList.remove('hidden');
 
         try {
-
-            const cached = allStudents.find((s) => s._id === studentId);
-            const studentData = cached || (await fetchStudentById(studentId));
+            const studentData = await fetchStudentDetails(studentId);
             fillEditForm(studentData);
         } catch (err) {
             showToast(err.message || 'تعذر جلب بيانات الطالب', 'error');
@@ -276,7 +410,7 @@
 
             const ageValue = editAgeInput.value.trim();
             const payload = {
-                id: pendingEditId, // updateStudent reads req.body.id
+                id: pendingEditId,
                 name: editNameInput.value.trim(),
                 parent_name: editParentInput.value.trim(),
                 phone_number: editPhoneInput.value.trim(),
@@ -302,7 +436,62 @@
         });
     }
 
-    // Single delegated click listener for BOTH edit and delete buttons.
+    // =====================================================================
+    // Move-to-another-محفظ dialog (admin only)
+    // =====================================================================
+    function openMoveDialog(studentId, studentName) {
+        pendingMoveId = studentId;
+        moveStudentNameEl.textContent = studentName;
+
+        const currentOwner = getEffectiveUserId();
+        moveTargetSelect.innerHTML = adminUsers
+            .filter((u) => u._id !== currentOwner)
+            .map((u) => `<option value="${escapeHtml(u._id)}">${escapeHtml(u.name)}</option>`)
+            .join('');
+
+        moveOverlay.classList.remove('hidden');
+    }
+
+    function closeMoveDialog() {
+        pendingMoveId = null;
+        moveOverlay.classList.add('hidden');
+    }
+
+    if (cancelMoveBtn) cancelMoveBtn.addEventListener('click', closeMoveDialog);
+    if (moveOverlay) {
+        moveOverlay.addEventListener('click', (e) => {
+            if (e.target === moveOverlay) closeMoveDialog();
+        });
+    }
+
+    if (confirmMoveBtn) {
+        confirmMoveBtn.addEventListener('click', async () => {
+            if (!pendingMoveId) return;
+            const targetUserId = moveTargetSelect.value;
+            if (!targetUserId) {
+                showToast('اختر المحفظ الذي تريد نقل الطالب إليه', 'error');
+                return;
+            }
+
+            confirmMoveBtn.disabled = true;
+            const original = confirmMoveBtn.innerHTML;
+            confirmMoveBtn.innerHTML = `<span class="spinner show" style="border-color:rgba(255,255,255,0.4);border-top-color:#fff;width:16px;height:16px;border-width:2px"></span>`;
+
+            try {
+                await moveStudentRequest(pendingMoveId, targetUserId);
+                closeMoveDialog();
+                showToast('تم نقل الطالب بنجاح', 'success');
+                load();
+            } catch (err) {
+                showToast(err.message || 'حدث خطأ أثناء النقل', 'error');
+            } finally {
+                confirmMoveBtn.disabled = false;
+                confirmMoveBtn.innerHTML = original;
+            }
+        });
+    }
+
+    // Single delegated click listener for edit / delete / move buttons.
     studentsList.addEventListener('click', (e) => {
         const deleteBtn = e.target.closest('.delete-btn');
         if (deleteBtn) {
@@ -314,9 +503,62 @@
 
         const editBtn = e.target.closest('.edit-btn');
         if (editBtn) {
-            openEditDialog(editBtn.dataset.id);
+            // NEW — same fix as the add-student button: navigate to the
+            // edit page with the studentId AND the owning محفظ's userId,
+            // so add-student.js doesn't hit "لا يوجد محفظ نشط" for admins
+            // (who have no active_user_id of their own in localStorage).
+            location.href = buildEditStudentUrl(editBtn.dataset.id);
+            return;
+        }
+
+        const moveBtn = e.target.closest('.move-btn');
+        if (moveBtn) {
+            const card = moveBtn.closest('.student-card');
+            const studentName = card.querySelector('.student-name').textContent;
+            openMoveDialog(moveBtn.dataset.id, studentName);
         }
     });
+
+    // =====================================================================
+    // NEW — Admin panel: list محفظين, click one to view their students
+    // =====================================================================
+    function renderAdminUsers(users) {
+        adminUsersListEl.innerHTML = users.map((u) => `
+            <button type="button" class="admin-user-chip" data-id="${escapeHtml(u._id)}">
+                ${escapeHtml(u.name)}
+            </button>
+        `).join('');
+    }
+
+    if (adminUsersListEl) {
+        adminUsersListEl.addEventListener('click', (e) => {
+            const chip = e.target.closest('.admin-user-chip');
+            if (!chip) return;
+
+            viewingUserId = chip.dataset.id;
+            document.querySelectorAll('.admin-user-chip').forEach((b) => {
+                b.classList.toggle('active', b === chip);
+            });
+
+            load();
+        });
+    }
+
+    async function initAdminPanel() {
+        if (!isAdminMode()) {
+            if (adminPanel) adminPanel.classList.add('hidden');
+            return;
+        }
+
+        if (adminPanel) adminPanel.classList.remove('hidden');
+
+        try {
+            adminUsers = await fetchAdminUsers();
+            renderAdminUsers(adminUsers);
+        } catch (err) {
+            showToast(err.message || 'تعذر تحميل قائمة المحفظين', 'error');
+        }
+    }
 
     // =====================================================================
     // Rendering
@@ -344,6 +586,10 @@
                 <button class="edit-btn" data-id="${escapeHtml(student._id)}" title="تعديل الطالب">
                     <span class="material-symbols-outlined">edit</span>
                 </button>
+                ${isAdminMode() ? `
+                <button class="move-btn" data-id="${escapeHtml(student._id)}" title="نقل الطالب لمحفظ آخر">
+                    <span class="material-symbols-outlined">move_up</span>
+                </button>` : ''}
                 <button class="delete-btn" data-id="${escapeHtml(student._id)}" title="حذف الطالب">
                     <span class="material-symbols-outlined">delete</span>
                 </button>
@@ -378,19 +624,34 @@
     // Load flow
     // =====================================================================
     async function load() {
-        const userId = getActiveUserId();
+        const userId = getEffectiveUserId();
 
         if (!userId) {
-            headerSubtitle.textContent = 'غير مسجل';
-            sideName.textContent = '—';
-            countSubtitle.textContent = '—';
             searchSection.classList.add('hidden');
-            showOnly(noWalletState);
+
+            if (isAdminMode()) {
+                // Admin is logged in but hasn't picked a محفظ yet.
+                headerSubtitle.textContent = 'اختر محفظاً';
+                sideName.textContent = 'لوحة الإدارة';
+                countSubtitle.textContent = '—';
+                showOnly(selectMentorState);
+            } else {
+                headerSubtitle.textContent = 'غير مسجل';
+                sideName.textContent = '—';
+                countSubtitle.textContent = '—';
+                showOnly(noWalletState);
+            }
             return;
         }
 
         searchSection.classList.remove('hidden');
         showOnly(loadingState);
+
+        // While viewing as admin, show whose students these are.
+        if (isAdminMode() && viewingUserId) {
+            const owner = adminUsers.find((u) => u._id === viewingUserId);
+            if (owner) sideName.textContent = owner.name;
+        }
 
         try {
             const students = await fetchStudents(userId);
@@ -427,59 +688,5 @@
         if (!document.hidden) load();
     });
 
-    load();
+    initAdminPanel().then(load);
 })();
-
-/* =========================================================================
-   HTML you need to add (mirrors your existing #deleteOverlay markup).
-   Place it next to the delete overlay in your HTML file.
-   =========================================================================
-
-<div id="editOverlay" class="overlay hidden">
-  <div class="dialog">
-    <h3>تعديل بيانات الطالب</h3>
-    <form id="editForm">
-      <input type="hidden" id="editId">
-
-      <label>
-        الاسم
-        <input type="text" id="editName" required>
-      </label>
-
-      <label>
-        اسم ولي الأمر
-        <input type="text" id="editParentName">
-      </label>
-
-      <label>
-        رقم الهاتف
-        <input type="tel" id="editPhone">
-      </label>
-
-      <label>
-        العمر
-        <input type="number" id="editAge" min="0">
-      </label>
-
-      <label>
-        الجنس
-        <select id="editGender">
-          <option value="">—</option>
-          <option value="ذكر">ذكر</option>
-          <option value="أنثى">أنثى</option>
-        </select>
-      </label>
-
-      <div id="editLoading" class="hidden">جارِ التحميل...</div>
-
-      <div class="dialog-actions">
-        <button type="button" id="cancelEditBtn">إلغاء</button>
-        <button type="submit" id="confirmEditBtn">
-          <span class="material-symbols-outlined text-base">save</span> حفظ
-        </button>
-      </div>
-    </form>
-  </div>
-</div>
-
-========================================================================= */
