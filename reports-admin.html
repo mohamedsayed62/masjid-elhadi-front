@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>تقرير المسؤول</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="assets/css/reports.css">
+<script>
+tailwind.config = {
+    darkMode: "class",
+    theme: {
+        extend: {
+            colors: {
+                "primary": "#0B1D3A",
+                "primary-container": "#0b1d3a",
+                "on-primary": "#ffffff",
+                "secondary": "#C9A23A",
+                "secondary-container": "#fdd265",
+                "on-secondary-container": "#755900",
+                "secondary-fixed-dim": "#ebc156",
+                "surface": "#F5F6F8",
+                "surface-container": "#FFFFFF",
+                "surface-container-low": "#f3f3f4",
+                "surface-container-high": "#e8e8e8",
+                "surface-container-highest": "#e2e2e2",
+                "on-surface": "#1a1c1c",
+                "on-surface-variant": "#44474d",
+                "outline": "#75777e",
+                "outline-variant": "#e2e2e2",
+                "error": "#BA1A1A",
+                "error-container": "#ffdad6",
+                "success": "#1E7D45",
+                "success-container": "#d4f5dd",
+                "warning": "#E67E22",
+                "warning-container": "#ffedd5",
+                "background": "#F5F6F8",
+            },
+            fontFamily: { "body": ["Cairo", "sans-serif"] },
+        }
+    }
+}
+</script>
+</head>
+<body class="text-on-surface antialiased min-h-screen flex flex-col md:flex-row relative pb-20 md:pb-0">
+
+<header class="md:hidden bg-surface-container flex justify-between items-center px-4 py-3 w-full sticky top-0 shadow-sm z-40">
+    <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+            <span class="material-symbols-outlined text-primary text-2xl">analytics</span>
+        </div>
+        <h1 class="text-xl font-bold text-primary leading-tight">تقرير المسؤول</h1>
+    </div>
+</header>
+
+<main class="flex-1 flex flex-col w-full max-w-5xl mx-auto px-4 md:px-8 py-6 min-h-screen" id="mainContent">
+    <div class="flex-1 flex items-center justify-center">
+        <span class="material-symbols-outlined text-4xl text-outline animate-spin">progress_activity</span>
+    </div>
+</main>
+
+<script src="assets/js/reportsAdmin.js"></script>
+</body>
+</html>
