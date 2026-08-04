@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const API_BASE = "http://localhost:3000/api";
+  const API_BASE = "https://masjid-nodejs-production.up.railway.app/api";
 
   // The admin endpoint is protected — token must be set (e.g. after admin login)
   // via: localStorage.setItem("admin_token", "<jwt>")
