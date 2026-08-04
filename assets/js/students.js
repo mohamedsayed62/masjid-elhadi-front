@@ -301,6 +301,10 @@
         if (!res.ok || json.status !== 'success') {
             throw new Error(json.message || 'تعذر جلب قائمة المحفظين');
         }
+        let reportsLinkBtn = document.querySelectorAll('.reports-btn');
+        reportsLinkBtn.forEach(e => {
+            e.href = 'reports-admin.html';
+        })
 
         return Array.isArray(json.data) ? json.data : [];
     }
