@@ -41,7 +41,6 @@
 
     let students           = [];
     let selectedDate       = '';
-    let sessionName        = '';
     let records            = {};   // { [studentId]: 'present' | 'absent' | 'late' | 'excused' }
     let existingDayRecords = {};
     let confirmCallback    = null;
@@ -101,14 +100,13 @@
      * FIX #4: sessionNameVal added so the session name captured from the UI
      * is actually included in the request body instead of being silently dropped.
      */
-    function postAttendance(studentId, day, attend, sessionNameVal) {
+    function postAttendance(studentId, day, attend) {
         return apiRequest(CONFIG.ATTENDANCE_ENDPOINT(), {
             method: 'POST',
             body: JSON.stringify({
                 student_id: studentId,
                 day,
-                attend,
-                ...(sessionNameVal ? { session_name: sessionNameVal } : {}),
+                attend
             }),
         });
     }
@@ -155,7 +153,7 @@
         const entries = Object.entries(records);
         const results = await Promise.allSettled(
             entries.map(([studentId, status]) =>
-                postAttendance(studentId, day, status, sessionName)
+                postAttendance(studentId, day, status)
             )
         );
         const failed = results.filter(r => r.status === 'rejected');
@@ -227,7 +225,6 @@
             records            = {};
             existingDayRecords = {};
             selectedDate       = '';
-            sessionName        = '';
 
             paintAdminPanel();
             render();
@@ -431,12 +428,6 @@
                     <span class="material-symbols-outlined text-error text-lg">warning</span>
                     <p class="text-xs text-error font-semibold">لا يمكن تسجيل حضور لتاريخ في المستقبل</p>
                 </div>` : ''}
-            </section>
-
-            <section class="bg-surface-container rounded-2xl p-5 shadow-sm mb-4 fade-in" style="animation-delay:.1s">
-                <label class="text-label-bold text-on-surface-variant mb-2 block">اسم الجلسة (اختياري)</label>
-                <input type="text" id="sessionNameInput" class="date-input"
-                    placeholder="مثال: حلقة تحفيظ صباحية" value="${escapeHtml(sessionName)}"/>
             </section>
 
             <section class="bg-surface-container rounded-2xl p-4 shadow-sm mb-4 fade-in" style="animation-delay:.15s">
