@@ -37,6 +37,23 @@
     };
   }
 
+  // Extracts filename="..." from a Content-Disposition header, if present.
+  function filenameFromDisposition(disposition, fallback) {
+    if (!disposition) return fallback;
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+    return match ? decodeURIComponent(match[1]) : fallback;
+  }
+
+  // Guesses a file extension from the response content-type, since the
+  // backend might return xlsx, pdf, or csv depending on implementation.
+  function extensionFromContentType(contentType) {
+    if (!contentType) return "xlsx";
+    if (contentType.includes("pdf")) return "pdf";
+    if (contentType.includes("csv")) return "csv";
+    if (contentType.includes("spreadsheet") || contentType.includes("excel")) return "xlsx";
+    return "xlsx";
+  }
+
   // ---------- API calls ----------
 
   async function fetchAdminReport(from, to) {
@@ -54,6 +71,41 @@
     // We only care about the percentages object here.
     const percentages = json.data;
     return percentages || { present: 0, absent: 0, late: 0, excused: 0 };
+  }
+
+  async function downloadAdminReport(from, to) {
+    const res = await fetch(`${API_BASE}/reports/download/admin`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ from, to }),
+    });
+
+    if (!res.ok) {
+      // Backend may return JSON error even on a "download" endpoint.
+      let message = "تعذر تنزيل التقرير";
+      try {
+        const errJson = await res.json();
+        message = errJson.message || message;
+      } catch (_) {
+        /* response wasn't JSON, keep default message */
+      }
+      throw new Error(message);
+    }
+
+    const blob = await res.blob();
+    const contentType = res.headers.get("Content-Type");
+    const disposition = res.headers.get("Content-Disposition");
+    const fallbackName = `attendance-report-${from}-to-${to}.${extensionFromContentType(contentType)}`;
+    const filename = filenameFromDisposition(disposition, fallbackName);
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   // ---------- rendering ----------
@@ -80,6 +132,11 @@
             class="flex items-center gap-2 bg-primary text-on-primary px-4 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity">
             <span class="material-symbols-outlined text-base">refresh</span>
             <span class="hidden md:inline">تحديث</span>
+          </button>
+          <button id="downloadBtn"
+            class="flex items-center gap-2 bg-secondary text-on-secondary-container px-4 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity">
+            <span class="material-symbols-outlined text-base">download</span>
+            <span class="hidden md:inline">تحميل التقرير</span>
           </button>
         </div>
       </div>
@@ -176,6 +233,18 @@
     document.getElementById("retryBtn").addEventListener("click", () => loadAll(currentFrom, currentTo));
   }
 
+  // Simple, non-blocking toast for download errors so a failed download
+  // doesn't need to blow away the whole report view via renderFatalError.
+  function showToast(message, isError) {
+    const toast = document.createElement("div");
+    toast.textContent = message;
+    toast.className = `fixed bottom-6 inset-x-0 mx-auto w-fit max-w-[90%] px-4 py-2 rounded-lg text-sm shadow-lg z-50 ${
+      isError ? "bg-error text-white" : "bg-primary text-on-primary"
+    }`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3500);
+  }
+
   // ---------- orchestration ----------
 
   async function loadAll(from, to) {
@@ -199,6 +268,29 @@
       const newFrom = fromPicker.value || from;
       const newTo = toPicker.value || to;
       loadAll(newFrom, newTo);
+    });
+
+    const downloadBtn = document.getElementById("downloadBtn");
+    downloadBtn.addEventListener("click", async () => {
+      const dlFrom = fromPicker.value || currentFrom;
+      const dlTo = toPicker.value || currentTo;
+
+      downloadBtn.disabled = true;
+      const originalHTML = downloadBtn.innerHTML;
+      downloadBtn.innerHTML = `
+        <span class="material-symbols-outlined text-base animate-spin">progress_activity</span>
+        <span class="hidden md:inline">جاري التحميل...</span>
+      `;
+
+      try {
+        await downloadAdminReport(dlFrom, dlTo);
+      } catch (err) {
+        console.error(err);
+        showToast(err.message, true);
+      } finally {
+        downloadBtn.disabled = false;
+        downloadBtn.innerHTML = originalHTML;
+      }
     });
 
     try {
