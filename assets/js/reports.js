@@ -4,33 +4,46 @@
   const API_BASE = "https://masjid-nodejs-production.up.railway.app/api";
 
   const userId = localStorage.getItem("active_user_id");
-  // TODO: this should be the test's own id, not the user id — localStorage
-  // needs a separate "active_test_id" (or pass the test id in via the page/route)
-  const testId = localStorage.getItem("active_user_id");
+  const testId = localStorage.getItem("active_test_id");
 
   const mainContent = document.getElementById("mainContent");
   let attendanceChart = null;
-  let currentDay = null;
+  let currentRange = null; // { from, to }
 
   // ---------- helpers ----------
 
-  // Backend does `new Date(req.body.day)`, which reliably parses as UTC
-  // midnight only for the ISO "YYYY-MM-DD" form — so that's what we always send.
-  // <input type="date"> already gives us this exact format, so no conversion needed.
-  function todayIsoDate() {
+  /**
+   * Returns fetch headers that always include the Bearer token.
+   * Pass json = false for GET requests that send no body.
+   */
+  function authHeaders(json = true) {
+    const h = {};
+    if (json) h["Content-Type"] = "application/json";
+    return h;
+  }
+
+  // ISO "YYYY-MM-DD" — the only format the backend reliably parses as UTC midnight.
+  function isoDate(d = new Date()) {
+    return [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, "0"),
+      String(d.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+
+  function daysAgoIsoDate(n) {
     const d = new Date();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${d.getFullYear()}-${mm}-${dd}`;
+    d.setDate(d.getDate() - n);
+    return isoDate(d);
   }
 
   // ---------- API calls ----------
 
-  async function fetchAttendanceReport(day) {
+  async function fetchAttendanceReport(from, to) {
     const res = await fetch(`${API_BASE}/reports`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, day }),
+      headers: authHeaders(),
+      body: JSON.stringify({ userId, from, to }),
     });
     const json = await res.json();
     if (!res.ok || json.status !== "success") {
@@ -40,7 +53,9 @@
   }
 
   async function fetchTestResults(id) {
-    const res = await fetch(`${API_BASE}/tests/${id}`);
+    const res = await fetch(`${API_BASE}/tests/${id}`, {
+      headers: authHeaders(false), // GET — no body, no Content-Type
+    });
     const json = await res.json();
     if (!res.ok || json.status !== "success") {
       throw new Error(json.message || "تعذر تحميل نتائج التقييم");
@@ -48,15 +63,14 @@
     return json.data; // [{ totalDegree, student_id, name }]
   }
 
-  async function downloadReportExcel(day) {
+  async function downloadReportExcel(from, to) {
     const res = await fetch(`${API_BASE}/reports/download`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, day }),
+      headers: authHeaders(),
+      body: JSON.stringify({ userId, from, to }),
     });
 
     if (!res.ok) {
-      // the endpoint may return JSON on failure instead of a file
       let message = "تعذر تنزيل ملف إكسل";
       try {
         const json = await res.json();
@@ -69,21 +83,20 @@
 
     const blob = await res.blob();
 
-    // prefer the filename the server suggests, fall back to a local one
-    let filename = `report-${day}.xlsx`;
+    let filename = `report-${from}_${to}.xlsx`;
     const disposition = res.headers.get("Content-Disposition");
     if (disposition) {
       const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-      if (match && match[1]) filename = decodeURIComponent(match[1]);
+      if (match?.[1]) filename = decodeURIComponent(match[1]);
     }
 
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     URL.revokeObjectURL(url);
   }
 
@@ -91,14 +104,26 @@
 
   function renderLayout() {
     mainContent.innerHTML = `
-      <div class="flex items-center justify-between mb-6 fade-in">
+      <div class="flex items-center justify-between mb-6 fade-in flex-wrap gap-4">
         <div>
-          <h2 class="text-2xl font-bold text-primary">تقرير اليوم</h2>
+          <h2 class="text-2xl font-bold text-primary">تقرير الفترة</h2>
           <p class="text-sm text-on-surface-variant" id="reportDateLabel"></p>
         </div>
-        <div class="flex items-center gap-2">
-          <input type="date" id="dayPicker"
-            class="border border-outline-variant rounded-lg px-3 py-2 text-sm bg-surface-container text-on-surface" />
+        <div class="flex items-center gap-2 flex-wrap justify-end">
+          <div class="flex items-center gap-1">
+            <label class="text-xs text-on-surface-variant whitespace-nowrap">من</label>
+            <input type="date" id="fromPicker"
+              class="border border-outline-variant rounded-lg px-3 py-2 text-sm bg-surface-container text-on-surface" />
+          </div>
+          <div class="flex items-center gap-1">
+            <label class="text-xs text-on-surface-variant whitespace-nowrap">إلى</label>
+            <input type="date" id="toPicker"
+              class="border border-outline-variant rounded-lg px-3 py-2 text-sm bg-surface-container text-on-surface" />
+          </div>
+          <button id="applyRangeBtn"
+            class="bg-secondary text-white px-3 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity">
+            تطبيق
+          </button>
           <button id="exportBtn"
             class="no-print flex items-center gap-2 bg-primary text-on-primary px-4 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity">
             <span class="spinner" id="exportSpinner"></span>
@@ -130,25 +155,25 @@
   }
 
   const STAT_CONFIG = {
-    present: { label: "حاضر", icon: "check_circle", color: "success" },
-    late: { label: "متأخر", icon: "schedule", color: "warning" },
-    excused: { label: "مستأذن", icon: "info", color: "secondary" },
-    absent: { label: "غائب", icon: "cancel", color: "error" },
+    present:  { label: "حاضر",    icon: "check_circle", color: "success"   },
+    late:     { label: "متأخر",   icon: "schedule",     color: "warning"   },
+    excused:  { label: "مستأذن", icon: "info",          color: "secondary" },
+    absent:   { label: "غائب",    icon: "cancel",       color: "error"     },
   };
 
   function renderStatCards(data) {
     const total =
       (Math.round(data.present) || 0) +
-      (Math.round(data.absent) || 0) +
-      (Math.round(data.late) || 0) +
+      (Math.round(data.absent)  || 0) +
+      (Math.round(data.late)    || 0) +
       (Math.round(data.excused) || 0);
-    const container = document.getElementById("statCards");
 
+    const container = document.getElementById("statCards");
     container.innerHTML = Object.keys(STAT_CONFIG)
       .map((key) => {
-        const cfg = STAT_CONFIG[key];
+        const cfg   = STAT_CONFIG[key];
         const value = Math.round(data[key]) || 0;
-        const pct = total ? Math.round((value / total) * 100) : 0;
+        const pct   = total ? Math.round((value / total) * 100) : 0;
         return `
           <div class="stat-card bg-surface-container rounded-2xl p-4 fade-in">
             <div class="flex items-center justify-between mb-2">
@@ -168,12 +193,12 @@
     const labels = ["حاضر", "متأخر", "مستأذن", "غائب"];
     const values = [
       Math.round(data.present) || 0,
-      Math.round(data.late) || 0,
+      Math.round(data.late)    || 0,
       Math.round(data.excused) || 0,
-      Math.round(data.absent) || 0,
+      Math.round(data.absent)  || 0,
     ];
     const colors = ["#1E7D45", "#E67E22", "#C9A23A", "#BA1A1A"];
-    const total = values.reduce((a, b) => a + b, 0);
+    const total  = values.reduce((a, b) => a + b, 0);
 
     if (attendanceChart) attendanceChart.destroy();
     attendanceChart = new Chart(canvas, {
@@ -189,7 +214,7 @@
     legend.innerHTML = labels
       .map((label, i) => {
         const value = values[i];
-        const pct = total ? Math.round((value / total) * 100) : 0;
+        const pct   = total ? Math.round((value / total) * 100) : 0;
         return `
           <div class="flex items-center justify-between py-2 border-b border-outline-variant/50 last:border-0">
             <div class="flex items-center gap-2">
@@ -255,7 +280,7 @@
     `;
   }
 
-  function renderFatalError(message, day) {
+  function renderFatalError(message, from, to) {
     mainContent.innerHTML = `
       <div class="flex-1 flex flex-col items-center justify-center text-center py-12">
         <span class="material-symbols-outlined text-4xl text-error mb-3">error</span>
@@ -263,7 +288,7 @@
         <button id="retryBtn" class="mt-4 bg-primary text-on-primary px-4 py-2 rounded-lg text-sm">إعادة المحاولة</button>
       </div>
     `;
-    document.getElementById("retryBtn").addEventListener("click", () => loadAll(day));
+    document.getElementById("retryBtn").addEventListener("click", () => loadAll(from, to));
   }
 
   // ---------- export button ----------
@@ -271,12 +296,12 @@
   function wireExportButton(button, { spinner, icon } = {}) {
     if (!button) return;
     button.addEventListener("click", async () => {
-      if (!currentDay || button.disabled) return;
+      if (!currentRange || button.disabled) return;
       button.disabled = true;
       if (spinner) spinner.classList.add("show");
       if (icon) icon.style.display = "none";
       try {
-        await downloadReportExcel(currentDay);
+        await downloadReportExcel(currentRange.from, currentRange.to);
       } catch (err) {
         console.error(err);
         alert(err.message);
@@ -290,22 +315,31 @@
 
   // ---------- orchestration ----------
 
-  async function loadAll(day) {
-    currentDay = day;
+  async function loadAll(from, to) {
+    currentRange = { from, to };
     renderLayout();
-    document.getElementById("reportDateLabel").textContent = day;
 
-    const picker = document.getElementById("dayPicker");
-    picker.value = day;
-    picker.addEventListener("change", (e) => loadAll(e.target.value));
+    document.getElementById("reportDateLabel").textContent = `${from} — ${to}`;
+
+    const fromPicker = document.getElementById("fromPicker");
+    const toPicker   = document.getElementById("toPicker");
+    fromPicker.value = from;
+    toPicker.value   = to;
+
+    document.getElementById("applyRangeBtn").addEventListener("click", () => {
+      const f = fromPicker.value;
+      const t = toPicker.value;
+      if (f && t && f <= t) loadAll(f, t);
+    });
 
     wireExportButton(document.getElementById("exportBtn"), {
       spinner: document.getElementById("exportSpinner"),
-      icon: document.getElementById("exportIcon"),
+      icon:    document.getElementById("exportIcon"),
     });
 
+    // Attendance report
     try {
-      const attendance = await fetchAttendanceReport(day);
+      const attendance = await fetchAttendanceReport(from, to);
       renderStatCards(attendance);
       renderChart(attendance);
     } catch (err) {
@@ -314,6 +348,7 @@
         `<p class="col-span-2 md:col-span-4 text-error text-sm">${err.message}</p>`;
     }
 
+    // Test results
     try {
       const students = await fetchTestResults(testId);
       renderTestResults(students);
@@ -325,15 +360,16 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    loadAll(todayIsoDate());
+    // Default range: last 7 days → today
+    loadAll(daysAgoIsoDate(7), isoDate());
 
-    // static button in the mobile header (outside #mainContent, so wire it once)
+    // Static export button in the mobile header (outside #mainContent — wired once)
     document.getElementById("exportBtnMobile")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
-      if (!currentDay || btn.disabled) return;
+      if (!currentRange || btn.disabled) return;
       btn.disabled = true;
       try {
-        await downloadReportExcel(currentDay);
+        await downloadReportExcel(currentRange.from, currentRange.to);
       } catch (err) {
         console.error(err);
         alert(err.message);
