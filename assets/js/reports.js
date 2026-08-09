@@ -16,11 +16,6 @@
    * Returns fetch headers that always include the Bearer token.
    * Pass json = false for GET requests that send no body.
    */
-  function authHeaders(json = true) {
-    const h = {};
-    if (json) h["Content-Type"] = "application/json";
-    return h;
-  }
 
   // ISO "YYYY-MM-DD" — the only format the backend reliably parses as UTC midnight.
   function isoDate(d = new Date()) {
@@ -42,7 +37,6 @@
   async function fetchAttendanceReport(from, to) {
     const res = await fetch(`${API_BASE}/reports`, {
       method: "POST",
-      headers: authHeaders(),
       body: JSON.stringify({ userId, from, to }),
     });
     const json = await res.json();
@@ -53,9 +47,7 @@
   }
 
   async function fetchTestResults(id) {
-    const res = await fetch(`${API_BASE}/tests/${id}`, {
-      headers: authHeaders(false), // GET — no body, no Content-Type
-    });
+    const res = await fetch(`${API_BASE}/tests/${id}`);
     const json = await res.json();
     if (!res.ok || json.status !== "success") {
       throw new Error(json.message || "تعذر تحميل نتائج التقييم");
@@ -66,7 +58,6 @@
   async function downloadReportExcel(from, to) {
     const res = await fetch(`${API_BASE}/reports/download`, {
       method: "POST",
-      headers: authHeaders(),
       body: JSON.stringify({ userId, from, to }),
     });
 
