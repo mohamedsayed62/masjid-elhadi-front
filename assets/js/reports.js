@@ -1,69 +1,37 @@
 (function () {
   "use strict";
 
-    const API_BASE = "https://masjid-nodejs-production.up.railway.app/api";
+  const API_BASE = "https://masjid-nodejs-production.up.railway.app/api";
 
-  // Read once at startup; guarded before first use inside DOMContentLoaded
   const userId = localStorage.getItem("active_user_id");
-  const testId = localStorage.getItem("active_test_id");
+  // TODO: this should be the test's own id, not the user id — localStorage
+  // needs a separate "active_test_id" (or pass the test id in via the page/route)
+  const testId = localStorage.getItem("active_user_id");
 
-  // Assigned inside DOMContentLoaded so the DOM is guaranteed to exist
-  let mainContent = null;
+  const mainContent = document.getElementById("mainContent");
   let attendanceChart = null;
-  let currentRange = null;       // { from, to }
-  let activeController = null;   // AbortController — cancels stale requests on re-fetch
+  let currentRange = null; // { from, to }
 
   // ---------- helpers ----------
 
-  function authHeaders(json = true) {
-    const h = {};
-    if (json) h["Content-Type"] = "application/json";
-    return h;
-  }
-
-  // ISO "YYYY-MM-DD" in UTC — the only format the backend reliably parses as midnight.
-  function isoDate(d = new Date()) {
-    return d.toISOString().slice(0, 10);
-  }
-
-  function daysAgoIsoDate(n) {
+  // Backend does `new Date(req.body.from)` / `new Date(req.body.to)`, which
+  // reliably parses as UTC midnight only for the ISO "YYYY-MM-DD" form — so
+  // that's what we always send. <input type="date"> already gives us this
+  // exact format, so no conversion needed.
+  function todayIsoDate() {
     const d = new Date();
-    d.setUTCDate(d.getUTCDate() - n);
-    return isoDate(d);
-  }
-
-  // ---------- toast ----------
-
-  function showToast(message, type = "error") {
-    const existing = document.getElementById("app-toast");
-    if (existing) existing.remove();
-
-    const toast = document.createElement("div");
-    toast.id = "app-toast";
-    toast.setAttribute("role", "alert");
-    toast.setAttribute("aria-live", "assertive");
-    const bg =
-      type === "error"
-        ? "bg-error text-on-error"
-        : "bg-secondary text-white";
-    toast.className = `fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium ${bg} transition-opacity duration-300`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-
-    setTimeout(() => {
-      toast.style.opacity = "0";
-      setTimeout(() => toast.remove(), 300);
-    }, 4000);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${mm}-${dd}`;
   }
 
   // ---------- API calls ----------
 
-  async function fetchAttendanceReport(from, to, signal) {
+  async function fetchAttendanceReport(from, to) {
     const res = await fetch(`${API_BASE}/reports`, {
       method: "POST",
-      headers: authHeaders(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, from, to }),
-      signal,
     });
     const json = await res.json();
     if (!res.ok || json.status !== "success") {
@@ -72,12 +40,8 @@
     return json.data; // { present, absent, late, excused }
   }
 
-  // testId is module-level; no need to pass it as a parameter
-  async function fetchTestResults(signal) {
-    const res = await fetch(`${API_BASE}/tests/${testId}`, {
-      headers: authHeaders(false), // GET — no body, no Content-Type
-      signal,
-    });
+  async function fetchTestResults(id) {
+    const res = await fetch(`${API_BASE}/tests/${id}`);
     const json = await res.json();
     if (!res.ok || json.status !== "success") {
       throw new Error(json.message || "تعذر تحميل نتائج التقييم");
@@ -88,11 +52,12 @@
   async function downloadReportExcel(from, to) {
     const res = await fetch(`${API_BASE}/reports/download`, {
       method: "POST",
-      headers: authHeaders(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId, from, to }),
     });
 
     if (!res.ok) {
+      // the endpoint may return JSON on failure instead of a file
       let message = "تعذر تنزيل ملف إكسل";
       try {
         const json = await res.json();
@@ -105,92 +70,69 @@
 
     const blob = await res.blob();
 
-    let filename = `report-${from}_${to}.xlsx`;
+    // prefer the filename the server suggests, fall back to a local one
+    let filename = `report-${from}_to_${to}.xlsx`;
     const disposition = res.headers.get("Content-Disposition");
     if (disposition) {
-      // Prefer RFC 5987 encoded filename* over plain filename
-      const match =
-        disposition.match(/filename\*=UTF-8''([^;]+)/i) ||
-        disposition.match(/filename="?([^";]+)"?/i);
-      if (match?.[1]) filename = decodeURIComponent(match[1].trim());
+      const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+      if (match && match[1]) filename = decodeURIComponent(match[1]);
     }
 
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
     URL.revokeObjectURL(url);
   }
 
   // ---------- rendering ----------
 
-  function renderStatCardSkeletons() {
-    return Array.from(
-      { length: 4 },
-      () => `
-        <div class="stat-card bg-surface-container rounded-2xl p-4 animate-pulse">
-          <div class="h-6 w-6 rounded-full bg-outline-variant mb-2"></div>
-          <div class="h-8 w-16 rounded bg-outline-variant mb-1"></div>
-          <div class="h-3 w-12 rounded bg-outline-variant"></div>
-        </div>`
-    ).join("");
-  }
-
   function renderLayout() {
     mainContent.innerHTML = `
-      <div class="flex items-center justify-between mb-6 fade-in flex-wrap gap-4">
+      <div class="flex items-center justify-between mb-6 fade-in flex-wrap gap-3">
         <div>
           <h2 class="text-2xl font-bold text-primary">تقرير الفترة</h2>
           <p class="text-sm text-on-surface-variant" id="reportDateLabel"></p>
         </div>
-        <div class="flex items-center gap-2 flex-wrap justify-end">
+        <div class="flex items-center gap-2 flex-wrap">
           <div class="flex items-center gap-1">
-            <label for="fromPicker" class="text-xs text-on-surface-variant whitespace-nowrap">من</label>
+            <label for="fromPicker" class="text-xs text-on-surface-variant">من</label>
             <input type="date" id="fromPicker"
               class="border border-outline-variant rounded-lg px-3 py-2 text-sm bg-surface-container text-on-surface" />
           </div>
           <div class="flex items-center gap-1">
-            <label for="toPicker" class="text-xs text-on-surface-variant whitespace-nowrap">إلى</label>
+            <label for="toPicker" class="text-xs text-on-surface-variant">إلى</label>
             <input type="date" id="toPicker"
               class="border border-outline-variant rounded-lg px-3 py-2 text-sm bg-surface-container text-on-surface" />
           </div>
-          <button id="applyRangeBtn"
-            class="bg-secondary text-white px-3 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity">
-            تطبيق
-          </button>
+          <p class="text-xs text-error hidden" id="rangeError">تاريخ البداية يجب أن يسبق تاريخ النهاية</p>
           <button id="exportBtn"
             class="no-print flex items-center gap-2 bg-primary text-on-primary px-4 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity">
-            <span class="spinner" id="exportSpinner" aria-hidden="true"></span>
-            <span class="material-symbols-outlined text-base" id="exportIcon" aria-hidden="true">download</span>
+            <span class="spinner" id="exportSpinner"></span>
+            <span class="material-symbols-outlined text-base" id="exportIcon">download</span>
             <span class="hidden md:inline">تصدير إكسل</span>
           </button>
         </div>
       </div>
 
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" id="statCards" aria-live="polite">
-        ${renderStatCardSkeletons()}
-      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" id="statCards"></div>
 
       <div class="bg-surface-container rounded-2xl p-5 mb-8 fade-in">
         <h3 class="font-bold text-primary mb-4">توزيع الحضور</h3>
         <div class="flex flex-col md:flex-row items-center gap-6">
-          <div class="w-48 h-48 shrink-0">
-            <canvas id="attendanceChart"
-              role="img"
-              aria-label="مخطط دائري يوضح توزيع الحضور"></canvas>
-          </div>
-          <div class="flex-1 w-full" id="attendanceLegend" aria-hidden="true"></div>
+          <div class="w-48 h-48 shrink-0"><canvas id="attendanceChart"></canvas></div>
+          <div class="flex-1 w-full" id="attendanceLegend"></div>
         </div>
       </div>
 
       <div class="bg-surface-container rounded-2xl p-5 fade-in">
         <h3 class="font-bold text-primary mb-4">نتائج التقييم</h3>
-        <div id="testResultsContainer" aria-live="polite">
-          <div class="flex justify-center py-6" role="status" aria-label="جارٍ التحميل">
-            <span class="material-symbols-outlined text-2xl text-outline animate-spin" aria-hidden="true">progress_activity</span>
+        <div id="testResultsContainer">
+          <div class="flex justify-center py-6">
+            <span class="material-symbols-outlined text-2xl text-outline animate-spin">progress_activity</span>
           </div>
         </div>
       </div>
@@ -198,32 +140,29 @@
   }
 
   const STAT_CONFIG = {
-    present: { label: "حاضر",   icon: "check_circle", color: "success"   },
-    late:    { label: "متأخر",  icon: "schedule",     color: "warning"   },
-    excused: { label: "مستأذن", icon: "info",         color: "secondary" },
-    absent:  { label: "غائب",   icon: "cancel",       color: "error"     },
+    present: { label: "حاضر", icon: "check_circle", color: "success" },
+    late: { label: "متأخر", icon: "schedule", color: "warning" },
+    excused: { label: "مستأذن", icon: "info", color: "secondary" },
+    absent: { label: "غائب", icon: "cancel", color: "error" },
   };
-
-  // Confirm the real passing threshold with the backend — 50 is a placeholder
-  const PASS_THRESHOLD = 50;
 
   function renderStatCards(data) {
     const total =
       (Math.round(data.present) || 0) +
-      (Math.round(data.absent)  || 0) +
-      (Math.round(data.late)    || 0) +
+      (Math.round(data.absent) || 0) +
+      (Math.round(data.late) || 0) +
       (Math.round(data.excused) || 0);
-
     const container = document.getElementById("statCards");
+
     container.innerHTML = Object.keys(STAT_CONFIG)
       .map((key) => {
-        const cfg   = STAT_CONFIG[key];
+        const cfg = STAT_CONFIG[key];
         const value = Math.round(data[key]) || 0;
-        const pct   = total ? Math.round((value / total) * 100) : 0;
+        const pct = total ? Math.round((value / total) * 100) : 0;
         return `
           <div class="stat-card bg-surface-container rounded-2xl p-4 fade-in">
             <div class="flex items-center justify-between mb-2">
-              <span class="material-symbols-outlined text-${cfg.color}" aria-hidden="true">${cfg.icon}</span>
+              <span class="material-symbols-outlined text-${cfg.color}">${cfg.icon}</span>
               <span class="text-xs text-on-surface-variant">${pct}%</span>
             </div>
             <p class="text-2xl font-extrabold text-primary">${value}</p>
@@ -239,20 +178,17 @@
     const labels = ["حاضر", "متأخر", "مستأذن", "غائب"];
     const values = [
       Math.round(data.present) || 0,
-      Math.round(data.late)    || 0,
+      Math.round(data.late) || 0,
       Math.round(data.excused) || 0,
-      Math.round(data.absent)  || 0,
+      Math.round(data.absent) || 0,
     ];
     const colors = ["#1E7D45", "#E67E22", "#C9A23A", "#BA1A1A"];
-    const total  = values.reduce((a, b) => a + b, 0);
+    const total = values.reduce((a, b) => a + b, 0);
 
     if (attendanceChart) attendanceChart.destroy();
     attendanceChart = new Chart(canvas, {
       type: "doughnut",
-      data: {
-        labels,
-        datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }],
-      },
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
       options: {
         cutout: "70%",
         plugins: { legend: { display: false } },
@@ -263,7 +199,7 @@
     legend.innerHTML = labels
       .map((label, i) => {
         const value = values[i];
-        const pct   = total ? Math.round((value / total) * 100) : 0;
+        const pct = total ? Math.round((value / total) * 100) : 0;
         return `
           <div class="flex items-center justify-between py-2 border-b border-outline-variant/50 last:border-0">
             <div class="flex items-center gap-2">
@@ -271,9 +207,7 @@
               <span class="text-sm text-on-surface">${label}</span>
             </div>
             <div class="flex items-center gap-3 w-1/2">
-              <div class="analysis-bar flex-1">
-                <div style="width:${pct}%; background:${colors[i]}"></div>
-              </div>
+              <div class="analysis-bar flex-1"><div style="width:${pct}%; background:${colors[i]}"></div></div>
               <span class="text-xs text-on-surface-variant w-14 text-left">${value} (${pct}%)</span>
             </div>
           </div>
@@ -282,13 +216,16 @@
       .join("");
   }
 
+  // TODO: confirm the real passing threshold with the backend — 50 is a placeholder
+  const PASS_THRESHOLD = 50;
+
   function renderTestResults(students) {
     const container = document.getElementById("testResultsContainer");
 
     if (!students || !students.length) {
       container.innerHTML = `
         <div class="empty-state flex flex-col items-center justify-center py-8 text-center">
-          <span class="material-symbols-outlined text-4xl text-outline mb-2" aria-hidden="true">quiz</span>
+          <span class="material-symbols-outlined text-4xl text-outline mb-2">quiz</span>
           <p class="text-sm text-on-surface-variant">لا توجد نتائج تقييم بعد</p>
         </div>
       `;
@@ -297,13 +234,12 @@
 
     container.innerHTML = `
       <div class="overflow-x-auto">
-        <table class="w-full text-sm" aria-label="نتائج الطلاب">
-          <caption class="sr-only">نتائج تقييم الطلاب</caption>
+        <table class="w-full text-sm">
           <thead>
             <tr class="text-on-surface-variant text-xs border-b border-outline-variant">
-              <th scope="col" class="text-right py-2 font-medium">الطالب</th>
-              <th scope="col" class="text-right py-2 font-medium">الدرجة</th>
-              <th scope="col" class="text-right py-2 font-medium">الحالة</th>
+              <th class="text-right py-2 font-medium">الطالب</th>
+              <th class="text-right py-2 font-medium">الدرجة</th>
+              <th class="text-right py-2 font-medium">الحالة</th>
             </tr>
           </thead>
           <tbody>
@@ -329,22 +265,15 @@
     `;
   }
 
-  // Shown when the attendance fetch itself fails — replaces the stat cards grid
-  function renderAttendanceError(message, from, to) {
-    const container = document.getElementById("statCards");
-    container.innerHTML = `
-      <div class="col-span-2 md:col-span-4 flex flex-col items-center justify-center py-8 text-center" role="alert">
-        <span class="material-symbols-outlined text-3xl text-error mb-2" aria-hidden="true">error</span>
-        <p class="text-on-surface font-medium text-sm">${message}</p>
-        <button id="retryAttendanceBtn"
-          class="mt-3 bg-primary text-on-primary px-4 py-2 rounded-lg text-sm">
-          إعادة المحاولة
-        </button>
+  function renderFatalError(message, from, to) {
+    mainContent.innerHTML = `
+      <div class="flex-1 flex flex-col items-center justify-center text-center py-12">
+        <span class="material-symbols-outlined text-4xl text-error mb-3">error</span>
+        <p class="text-on-surface font-medium">${message}</p>
+        <button id="retryBtn" class="mt-4 bg-primary text-on-primary px-4 py-2 rounded-lg text-sm">إعادة المحاولة</button>
       </div>
     `;
-    document
-      .getElementById("retryAttendanceBtn")
-      ?.addEventListener("click", () => loadAll(from, to));
+    document.getElementById("retryBtn").addEventListener("click", () => loadAll(from, to));
   }
 
   // ---------- export button ----------
@@ -360,7 +289,7 @@
         await downloadReportExcel(currentRange.from, currentRange.to);
       } catch (err) {
         console.error(err);
-        showToast(err.message);
+        alert(err.message);
       } finally {
         button.disabled = false;
         if (spinner) spinner.classList.remove("show");
@@ -372,74 +301,60 @@
   // ---------- orchestration ----------
 
   async function loadAll(from, to) {
-    // Cancel any in-flight requests from a previous call
-    if (activeController) activeController.abort();
-    activeController = new AbortController();
-    const { signal } = activeController;
-
     currentRange = { from, to };
     renderLayout();
-
-    document.getElementById("reportDateLabel").textContent = `${from} — ${to}`;
+    document.getElementById("reportDateLabel").textContent = from === to ? from : `${from} — ${to}`;
 
     const fromPicker = document.getElementById("fromPicker");
-    const toPicker   = document.getElementById("toPicker");
+    const toPicker = document.getElementById("toPicker");
+    const rangeError = document.getElementById("rangeError");
     fromPicker.value = from;
-    toPicker.value   = to;
+    toPicker.value = to;
 
-    // renderLayout() recreates the DOM each call, so listeners are always fresh
-    document.getElementById("applyRangeBtn").addEventListener("click", () => {
-      const f = fromPicker.value;
-      const t = toPicker.value;
-      if (f && t && f <= t) loadAll(f, t);
-    });
+    function onRangeChange() {
+      const newFrom = fromPicker.value;
+      const newTo = toPicker.value;
+      if (!newFrom || !newTo) return;
+      if (newFrom > newTo) {
+        rangeError.classList.remove("hidden");
+        return;
+      }
+      rangeError.classList.add("hidden");
+      loadAll(newFrom, newTo);
+    }
+    fromPicker.addEventListener("change", onRangeChange);
+    toPicker.addEventListener("change", onRangeChange);
 
     wireExportButton(document.getElementById("exportBtn"), {
       spinner: document.getElementById("exportSpinner"),
-      icon:    document.getElementById("exportIcon"),
+      icon: document.getElementById("exportIcon"),
     });
 
-    // Attendance report
     try {
-      const attendance = await fetchAttendanceReport(from, to, signal);
+      const attendance = await fetchAttendanceReport(from, to);
       renderStatCards(attendance);
       renderChart(attendance);
     } catch (err) {
-      if (err.name === "AbortError") return; // superseded by a newer loadAll call
       console.error(err);
-      renderAttendanceError(err.message, from, to);
+      document.getElementById("statCards").innerHTML =
+        `<p class="col-span-2 md:col-span-4 text-error text-sm">${err.message}</p>`;
     }
 
-    // Test results
     try {
-      const students = await fetchTestResults(signal);
+      const students = await fetchTestResults(testId);
       renderTestResults(students);
     } catch (err) {
-      if (err.name === "AbortError") return;
       console.error(err);
       document.getElementById("testResultsContainer").innerHTML =
-        `<p class="text-error text-sm" role="alert">${err.message}</p>`;
+        `<p class="text-error text-sm">${err.message}</p>`;
     }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    mainContent = document.getElementById("mainContent");
+    const today = todayIsoDate();
+    loadAll(today, today);
 
-    // Guard: both IDs must be present before making any API calls
-    if (!userId || !testId) {
-      mainContent.innerHTML = `
-        <div class="flex-1 flex flex-col items-center justify-center text-center py-12" role="alert">
-          <span class="material-symbols-outlined text-4xl text-error mb-3" aria-hidden="true">lock</span>
-          <p class="text-on-surface font-medium">جلسة غير صالحة، يرجى إعادة تسجيل الدخول</p>
-        </div>
-      `;
-      return;
-    }
-
-    // Default range: last 7 days → today
-    loadAll(daysAgoIsoDate(7), isoDate());
-
-    // Static export button in the mobile header (outside #mainContent — wired once)
+    // static button in the mobile header (outside #mainContent, so wire it once)
     document.getElementById("exportBtnMobile")?.addEventListener("click", async (e) => {
       const btn = e.currentTarget;
       if (!currentRange || btn.disabled) return;
@@ -448,7 +363,7 @@
         await downloadReportExcel(currentRange.from, currentRange.to);
       } catch (err) {
         console.error(err);
-        showToast(err.message);
+        alert(err.message);
       } finally {
         btn.disabled = false;
       }
