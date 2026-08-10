@@ -17,9 +17,18 @@
         // Save degrees. Matches: POST /tests  ->  storeTests(req.body: array)
         SAVE_EVALUATION_ENDPOINT: () => `/tests`,
 
+        // Admin-only: list every محفظ/user so an admin can pick whose
+        // students to view degrees for. Matches: GET /users/admin/getUsers
+        // Requires Authorization: Bearer <admin_token>
+        ADMIN_USERS_ENDPOINT: () => `/users/admin/getUsers`,
+
         // Subjects (المواد) are managed client-side only, per your request.
         SUBJECTS_STORAGE_KEY: 'eval_subjects',
     };
+
+    // LocalStorage keys — must match whatever the login screens write.
+    const ACTIVE_USER_ID_KEY = 'active_user_id';
+    const ADMIN_TOKEN_KEY    = 'admin_token';   // set by admin login; absent for regular محفظ
 
     // =====================================================================
     // DOM refs
@@ -43,23 +52,49 @@
     // =====================================================================
     // State
     // =====================================================================
-    let currentUserId = localStorage.getItem('active_user_id');
+    let currentUserId = localStorage.getItem(ACTIVE_USER_ID_KEY);
     let currentUserName = '';
     let students = [];
     let subjects = [];                 // ['حفظ', 'تجويد', ...]
     let evalMap = {};                  // { studentId: { subjectName: { degree, _id } } }
     let activeStudentId = null;        // student currently open in the modal
+
+    // --- admin / user-switching state -----------------------------
+    let allUsers = [];                  // list of محفظين returned by the admin endpoint (admin only)
+    let viewingUserId = null;           // whose students/degrees are currently shown.
+                                         // Regular محفظ: set to currentUserId immediately.
+                                         // Admin: stays null until they click a محفظ chip —
+                                         // no student data loads before that click.
+
     let isLoading = false;
     let isSavingDegrees = false;
 
     // =====================================================================
+    // Auth / mode helpers — same pattern as attendance.js
+    // =====================================================================
+    function getActiveUserId() {
+        return localStorage.getItem(ACTIVE_USER_ID_KEY);
+    }
+
+    function getAdminToken() {
+        return localStorage.getItem(ADMIN_TOKEN_KEY);
+    }
+
+    /** True when an admin JWT is present in localStorage. */
+    function isAdminMode() {
+        return !!getAdminToken();
+    }
+
+    // =====================================================================
     // API layer
     // =====================================================================
-    async function apiRequest(path, options) {
+    async function apiRequest(path, options = {}) {
+        const { headers: extraHeaders, ...restOptions } = options;
         const res = await fetch(CONFIG.API_BASE_URL + path, {
-            headers: { 'Content-Type': 'application/json' },
-            ...options,
+            headers: { 'Content-Type': 'application/json', ...(extraHeaders || {}) },
+            ...restOptions,
         });
+
         let body = null;
         try { body = await res.json(); } catch (e) { /* no body */ }
 
@@ -94,6 +129,26 @@
             method: 'POST',
             body: JSON.stringify(rows),
         });
+    }
+
+    /**
+     * GET /users/admin/getUsers — requires admin Bearer token.
+     * Only called when isAdminMode() is true. Returns [] on failure
+     * rather than throwing, so a bad/expired token doesn't break the page.
+     */
+    async function fetchAdminUsers() {
+        if (!isAdminMode()) return [];
+        const token = getAdminToken();
+        try {
+            const body = await apiRequest(CONFIG.ADMIN_USERS_ENDPOINT(), {
+                method: 'GET',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const list = (body && body.data) || [];
+            return Array.isArray(list) ? list : [];
+        } catch (e) {
+            return [];
+        }
     }
 
     // =====================================================================
@@ -182,10 +237,6 @@
     // =====================================================================
     // Helpers
     // =====================================================================
-    function getActiveUserId() {
-        return localStorage.getItem('active_user_id');
-    }
-
     function escapeHtml(str) {
         if (!str) return '';
         const div = document.createElement('div');
@@ -215,40 +266,167 @@
     // =====================================================================
     // Load
     // =====================================================================
-    async function render() {
-        currentUserId = getActiveUserId();
-        if (!currentUserId) {
-            renderNoUser();
-            return;
-        }
+async function render() {
+    currentUserId = getActiveUserId();
 
+    // =========================
+    // Admin
+    // =========================
+    if (isAdminMode()) {
         subjects = loadSubjects();
-        renderLoading();
-        isLoading = true;
 
-        try {
-            const [studentsRes, evaluationsRes] = await Promise.all([
-                fetchStudents(currentUserId),
-                fetchEvaluations(currentUserId),
-            ]);
-            students = studentsRes;
-            evalMap = buildEvalMap(evaluationsRes);
-        } catch (err) {
-            isLoading = false;
-            renderError(err.message);
-            return;
-        }
+        renderLoading();
+
+        allUsers = await fetchAdminUsers();
+
+        viewingUserId = null;
+
+        sideName.textContent = 'لوحة الإدارة';
+        headerSubtitle.textContent = 'اختر محفظاً';
+
+        renderSelectMentor();
+
+        return;
+    }
+
+    // =========================
+    // Regular محفظ
+    // =========================
+    if (!currentUserId) {
+        renderNoUser();
+        return;
+    }
+
+    subjects = loadSubjects();
+
+    allUsers = [];
+    viewingUserId = currentUserId;
+
+    renderLoading();
+    isLoading = true;
+
+    try {
+        await loadDataForUser(viewingUserId);
+    } catch (err) {
         isLoading = false;
+        renderError(err.message);
+        return;
+    }
+
+    isLoading = false;
+
+    if (students.length === 0) {
+        renderNoStudents();
+        return;
+    }
+
+    renderPage();
+}
+
+    // Fetch students + their test/degree records for a given user,
+    // and populate students/evalMap/header. Reused both on initial render
+    // and whenever an admin switches the selected محفظ.
+    async function loadDataForUser(userId) {
+        const [studentsRes, evaluationsRes] = await Promise.all([
+            fetchStudents(userId),
+            fetchEvaluations(userId),
+        ]);
+        students = studentsRes;
+        evalMap = buildEvalMap(evaluationsRes); // <-- degrees for every student, from GET /tests/:userId
+
+        const owner = allUsers.find((u) => String(u._id || u.id) === String(userId));
+        currentUserName = (owner && owner.name) || currentUserName;
 
         headerSubtitle.textContent = `الطلبة: ${students.length}`;
         sideName.textContent = currentUserName || 'المحفظ';
+    }
 
+    // Called when the admin clicks a محفظ chip — either from the initial
+    // mentor-selection screen or the small switcher shown atop the page.
+    // This is the point the first (and only) student/degree request fires.
+    async function switchViewingUser(userId) {
+        if (!userId || userId === viewingUserId) return;
+        viewingUserId = userId;
+        renderLoading();
+        try {
+            await loadDataForUser(viewingUserId);
+        } catch (err) {
+            renderError(err.message);
+            return;
+        }
         if (students.length === 0) {
             renderNoStudents();
             return;
         }
-
         renderPage();
+    }
+
+    function mentorChips() {
+        return `
+            <div class="flex gap-2 overflow-x-auto pb-1" id="adminUsersList">
+                ${allUsers.length
+                    ? allUsers.map((u) => {
+                        const uid = String(u._id || u.id);
+                        const active = String(viewingUserId) === uid;
+                        return `
+                            <button type="button"
+                                class="admin-user-chip flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-bold border transition-colors
+                                       ${active ? 'bg-secondary text-primary border-secondary' : 'bg-white/10 text-white border-white/20 hover:bg-white/20'}"
+                                data-id="${escapeHtml(uid)}">
+                                ${escapeHtml(u.name || u.username || uid)}
+                            </button>`;
+                      }).join('')
+                    : `<span class="text-white/40 text-sm">لا يوجد محفظون</span>`
+                }
+            </div>
+        `;
+    }
+
+    // =====================================================================
+    // Render: admin user-selector shown atop the page once a محفظ is chosen,
+    // so the admin can switch to a different one without a full reload.
+    // =====================================================================
+    function renderUserSelector() {
+        if (!isAdminMode() || allUsers.length === 0) return '';
+        return `
+            <section class="bg-primary rounded-2xl p-4 shadow-sm mb-4 fade-in">
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="material-symbols-outlined text-secondary">admin_panel_settings</span>
+                    <h4 class="text-white font-bold text-sm">لوحة الإدارة</h4>
+                </div>
+                ${mentorChips()}
+            </section>
+        `;
+    }
+
+    // =====================================================================
+    // Render: initial mentor-selection screen (admin only, before any
+    // محفظ has been picked). Mirrors attendance.js's renderSelectMentor.
+    // =====================================================================
+    function renderSelectMentor() {
+        mainContent.innerHTML = `
+            <section class="bg-primary rounded-2xl p-4 shadow-sm mb-4 fade-in">
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="material-symbols-outlined text-secondary">admin_panel_settings</span>
+                    <h4 class="text-white font-bold text-sm">لوحة الإدارة</h4>
+                </div>
+                ${mentorChips()}
+            </section>
+            <section class="flex-1 flex items-center justify-center fade-in py-10">
+                <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
+                    <div class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-secondary/10 mb-4">
+                        <span class="material-symbols-outlined text-secondary text-5xl">manage_accounts</span>
+                    </div>
+                    <h3 class="text-headline-md text-primary font-bold mb-2">اختر محفظاً</h3>
+                    <p class="text-body-md text-on-surface-variant">اختر محفظاً من الشريط أعلاه لعرض تقييمات طلبته</p>
+                </div>
+            </section>
+        `;
+        document.getElementById('adminUsersList')?.addEventListener('click', (e) => {
+            const chip = e.target.closest('.admin-user-chip');
+            if (!chip) return;
+            switchViewingUser(chip.dataset.id);
+        });
     }
 
     // =====================================================================
@@ -272,6 +450,8 @@
                     </button>
                 </div>
             </section>
+
+            ${renderUserSelector()}
 
             <!-- Subjects manager -->
             <section class="bg-surface-container rounded-2xl p-5 shadow-sm mb-4 fade-in" style="animation-delay: 0.05s">
@@ -342,6 +522,7 @@
         return students.map((s, idx) => {
             const id = String(s._id || s.id);
             const avg = studentAverage(id);
+            const total = studentTotal(id); // <-- degree total, populated right after GET /tests
             const colors = ringColor(avg);
             const subjectsMarked = Object.keys(studentSubjectDegrees(id)).length;
             return `
@@ -352,7 +533,7 @@
                     <div class="flex-1 min-w-0">
                         <p class="text-body-md font-bold text-primary truncate">${escapeHtml(s.name)}</p>
                         <p class="text-xs text-on-surface-variant mt-0.5">
-                            ${subjectsMarked > 0 ? `${subjectsMarked} مادة مسجَّلة` : 'لا توجد درجات بعد'}
+                            ${subjectsMarked > 0 ? `${subjectsMarked} مادة مسجَّلة · المجموع ${total}` : 'لا توجد درجات بعد'}
                         </p>
                     </div>
                     <span class="material-symbols-outlined text-on-surface-variant/50 rtl:-scale-x-100">chevron_left</span>
@@ -380,6 +561,13 @@
 
         document.querySelectorAll('.student-card').forEach((card) => {
             card.addEventListener('click', () => openDegreeModal(card.dataset.studentId));
+        });
+
+        // Admin user selector (chips)
+        document.getElementById('adminUsersList')?.addEventListener('click', (e) => {
+            const chip = e.target.closest('.admin-user-chip');
+            if (!chip) return;
+            switchViewingUser(chip.dataset.id);
         });
     }
 
@@ -450,6 +638,8 @@
         saveDegreesBtnText.textContent = 'جارٍ الحفظ...';
 
         // One batched request: [ { student_id, name, degree }, ... ]
+        // Saves go to the currently-viewed user (viewingUserId), which
+        // matters when an admin is entering degrees on someone else's behalf.
         const payload = toSave.map((row) => ({
             student_id: activeStudentId,
             name: row.subject,
@@ -555,4 +745,4 @@
 
     // Initial render
     render();
-})(); 
+})();
