@@ -79,7 +79,7 @@ function renderStudentDegrees(students) {
     { icon: "workspace_premium", bg: "bg-secondary/10", text: "text-secondary"          },
   ];
 
-  const maxDegree = students[0].totalDegree || 1;
+  const maxDegree = 100;
 
   section.innerHTML = students
     .map((s, i) => {
