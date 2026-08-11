@@ -73,13 +73,18 @@ function renderStudentDegrees(students) {
     return;
   }
 
+  const RANK_META = [
+    { icon: "emoji_events",      bg: "bg-warning/10",   text: "text-warning"            },
+    { icon: "military_tech",     bg: "bg-outline/10",   text: "text-on-surface-variant" },
+    { icon: "workspace_premium", bg: "bg-secondary/10", text: "text-secondary"          },
+  ];
+
   const maxDegree = students[0].totalDegree || 1;
 
   section.innerHTML = students
     .map((s, i) => {
-      // API already returns { totalDegree, name } — no aggregation needed
       const pct  = Math.round((s.totalDegree / maxDegree) * 100);
-      const meta = medal(i);
+      const meta = i < 3 ? RANK_META[i] : null;
       const rank = i + 1;
 
       const avatar = meta
@@ -112,7 +117,6 @@ function renderStudentDegrees(students) {
     })
     .join("");
 }
-
   function renderLoading() {
     const section = document.getElementById("studentDegreesSection");
     if (!section) return;
