@@ -18,19 +18,21 @@ window.TestsAPI = (function () {
     };
   }
 
-  // ── API ────────────────────────────────────────────────────────────────────
-
   async function fetchTests() {
-    const res = await fetch(`${API_BASE}/tests`, {
-      method: "GET",
-      headers: authHeaders(),
-    });
-    const json = await res.json();
-    if (!res.ok || json.status !== "success") {
-      throw new Error(json.message || "تعذر تحميل بيانات الاختبارات");
-    }
-    return json.data || [];
+  const res = await fetch(`${API_BASE}/tests`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  // API returns a plain array, not { status, data }
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.message || "تعذر تحميل بيانات الاختبارات");
   }
+
+  // Handle both shapes: plain array OR { data: [...] }
+  return Array.isArray(json) ? json : (json.data || []);
+}
 
   // ── aggregation ────────────────────────────────────────────────────────────
 
@@ -57,76 +59,59 @@ window.TestsAPI = (function () {
     return Object.values(map).sort((a, b) => b.totalDegree - a.totalDegree);
   }
 
-  // ── rendering ──────────────────────────────────────────────────────────────
+// ── rendering ──────────────────────────────────────────────────────────────
 
-  const RANK_META = [
-    { icon: "emoji_events",       bg: "bg-warning/10",    text: "text-warning"            },
-    { icon: "military_tech",      bg: "bg-outline/10",    text: "text-on-surface-variant" },
-    { icon: "workspace_premium",  bg: "bg-secondary/10",  text: "text-secondary"          },
-  ];
+function renderStudentDegrees(students) {
+  const section = document.getElementById("studentDegreesSection");
+  if (!section) return;
 
-  function medal(rank) {                      // rank is 0-indexed
-    if (rank >= 3) return null;
-    return RANK_META[rank];
+  if (!students.length) {
+    section.innerHTML = `
+      <p class="text-center text-on-surface-variant text-sm py-10">
+        لا توجد بيانات اختبارات حتى الآن
+      </p>`;
+    return;
   }
 
-  function renderStudentDegrees(students) {
-    const section = document.getElementById("studentDegreesSection");
-    if (!section) return;
+  const maxDegree = students[0].totalDegree || 1;
 
-    if (!students.length) {
-      section.innerHTML = `
-        <p class="text-center text-on-surface-variant text-sm py-10">
-          لا توجد بيانات اختبارات حتى الآن
-        </p>`;
-      return;
-    }
+  section.innerHTML = students
+    .map((s, i) => {
+      // API already returns { totalDegree, name } — no aggregation needed
+      const pct  = Math.round((s.totalDegree / maxDegree) * 100);
+      const meta = medal(i);
+      const rank = i + 1;
 
-    const maxDegree = students[0].totalDegree || 1;
+      const avatar = meta
+        ? `<div class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center ${meta.bg} ${meta.text}">
+             <span class="material-symbols-outlined text-xl">${meta.icon}</span>
+           </div>`
+        : `<div class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center
+                       bg-surface-container-high text-on-surface-variant font-bold text-sm">
+             ${rank}
+           </div>`;
 
-    section.innerHTML = students
-      .map((s, i) => {
-        const pct   = Math.round((s.totalDegree / maxDegree) * 100);
-        const meta  = medal(i);
-        const rank  = i + 1;
-
-        // Avatar: medal icon for top-3, number otherwise
-        const avatar = meta
-          ? `<div class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center ${meta.bg} ${meta.text}">
-               <span class="material-symbols-outlined text-xl">${meta.icon}</span>
-             </div>`
-          : `<div class="w-10 h-10 rounded-full shrink-0 flex items-center justify-center
-                         bg-surface-container-high text-on-surface-variant font-bold text-sm">
-               ${rank}
-             </div>`;
-
-        return `
-          <div class="flex items-center gap-4 px-4 py-3
-                      rounded-2xl bg-surface-container
-                      hover:bg-surface-container-high transition-colors
-                      fade-in">
-            ${avatar}
-
-            <div class="flex-1 min-w-0">
-              <p class="font-bold text-on-surface text-sm truncate">${s.name}</p>
-              <div class="flex items-center gap-2 mt-1.5">
-                <div class="analysis-bar flex-1">
-                  <div style="width:${pct}%; background:#0B1D3A"></div>
-                </div>
-                <span class="text-xs text-on-surface-variant shrink-0">
-                  ${s.testCount} اختبار
-                </span>
+      return `
+        <div class="flex items-center gap-4 px-4 py-3
+                    rounded-2xl bg-surface-container
+                    hover:bg-surface-container-high transition-colors fade-in">
+          ${avatar}
+          <div class="flex-1 min-w-0">
+            <p class="font-bold text-on-surface text-sm truncate">${s.name}</p>
+            <div class="flex items-center gap-2 mt-1.5">
+              <div class="analysis-bar flex-1">
+                <div style="width:${pct}%; background:#0B1D3A"></div>
               </div>
             </div>
-
-            <div class="shrink-0 text-start min-w-[52px]">
-              <p class="text-2xl font-extrabold text-primary leading-none">${s.totalDegree}</p>
-              <p class="text-xs text-on-surface-variant mt-0.5">درجة</p>
-            </div>
-          </div>`;
-      })
-      .join("");
-  }
+          </div>
+          <div class="shrink-0 text-start min-w-[52px]">
+            <p class="text-2xl font-extrabold text-primary leading-none">${s.totalDegree}</p>
+            <p class="text-xs text-on-surface-variant mt-0.5">درجة</p>
+          </div>
+        </div>`;
+    })
+    .join("");
+}
 
   function renderLoading() {
     const section = document.getElementById("studentDegreesSection");
@@ -157,16 +142,15 @@ window.TestsAPI = (function () {
   // ── public ─────────────────────────────────────────────────────────────────
 
   async function loadStudentDegrees() {
-    renderLoading();
-    try {
-      const tests    = await fetchTests();
-      const students = aggregateByStudent(tests);
-      renderStudentDegrees(students);
-    } catch (err) {
-      console.error("[TestsAPI]", err);
-      renderError(err.message);
-    }
+  renderLoading();
+  try {
+    const students = await fetchTests(); // already aggregated by the backend
+    renderStudentDegrees(students);
+  } catch (err) {
+    console.error("[TestsAPI]", err);
+    renderError(err.message);
   }
+}
 
   return { loadStudentDegrees };
 })();
