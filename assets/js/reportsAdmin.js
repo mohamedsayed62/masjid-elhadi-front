@@ -3,8 +3,6 @@
 
   const API_BASE = "https://masjid-nodejs-production.up.railway.app/api";
 
-  // The admin endpoint is protected — token must be set (e.g. after admin login)
-  // via: localStorage.setItem("admin_token", "<jwt>")
   const token = localStorage.getItem("admin_token");
 
   const mainContent = document.getElementById("mainContent");
@@ -14,8 +12,6 @@
 
   // ---------- helpers ----------
 
-  // <input type="date"> gives "YYYY-MM-DD". The backend splits on "-" and
-  // does Date.UTC(year, month-1, day), so this format is exactly what it wants.
   function isoDate(d) {
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
@@ -25,7 +21,7 @@
   function defaultRange() {
     const to = new Date();
     const from = new Date();
-    from.setDate(from.getDate() - 30); // default: last 30 days
+    from.setDate(from.getDate() - 30);
     return { from: isoDate(from), to: isoDate(to) };
   }
 
@@ -37,15 +33,12 @@
     };
   }
 
-  // Extracts filename="..." from a Content-Disposition header, if present.
   function filenameFromDisposition(disposition, fallback) {
     if (!disposition) return fallback;
     const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
     return match ? decodeURIComponent(match[1]) : fallback;
   }
 
-  // Guesses a file extension from the response content-type, since the
-  // backend might return xlsx, pdf, or csv depending on implementation.
   function extensionFromContentType(contentType) {
     if (!contentType) return "xlsx";
     if (contentType.includes("pdf")) return "pdf";
@@ -67,8 +60,6 @@
     if (!res.ok || json.status !== "success") {
       throw new Error(json.message || "تعذر تحميل تقرير الحضور");
     }
-    // data: [ { present, absent, late, excused } (percentages), [{ _id, count }, ...] ]
-    // We only care about the percentages object here.
     const percentages = json.data;
     return percentages || { present: 0, absent: 0, late: 0, excused: 0 };
   }
@@ -81,14 +72,11 @@
     });
 
     if (!res.ok) {
-      // Backend may return JSON error even on a "download" endpoint.
       let message = "تعذر تنزيل التقرير";
       try {
         const errJson = await res.json();
         message = errJson.message || message;
-      } catch (_) {
-        /* response wasn't JSON, keep default message */
-      }
+      } catch (_) {}
       throw new Error(message);
     }
 
@@ -112,6 +100,7 @@
 
   function renderLayout() {
     mainContent.innerHTML = `
+      <!-- ── Header + date pickers ───────────────────────────────────────── -->
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 fade-in">
         <div>
           <h2 class="text-2xl font-bold text-primary">تقرير الحضور العام</h2>
@@ -141,29 +130,45 @@
         </div>
       </div>
 
+      <!-- ── Stat cards ───────────────────────────────────────────────────── -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" id="statCards"></div>
 
-      <div class="bg-surface-container rounded-2xl p-5 fade-in">
+      <!-- ── Attendance chart ─────────────────────────────────────────────── -->
+      <div class="bg-surface-container rounded-2xl p-5 fade-in mb-8">
         <h3 class="font-bold text-primary mb-4">توزيع الحضور</h3>
         <div class="flex flex-col md:flex-row items-center gap-6">
           <div class="w-48 h-48 shrink-0"><canvas id="attendanceChart"></canvas></div>
           <div class="flex-1 w-full" id="attendanceLegend"></div>
         </div>
       </div>
+
+      <!-- ── Student degrees ──────────────────────────────────────────────── -->
+      <div class="bg-surface-container rounded-2xl p-5 fade-in">
+        <div class="flex items-center justify-between mb-5">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-secondary">leaderboard</span>
+            <h3 class="font-bold text-primary">درجات الطلاب</h3>
+          </div>
+          <span class="text-xs text-on-surface-variant bg-surface-container-high
+                        rounded-full px-3 py-1">
+            مجموع الدرجات لكل طالب
+          </span>
+        </div>
+        <!-- Skeleton/loaded cards go here -->
+        <div class="flex flex-col gap-2" id="studentDegreesSection"></div>
+      </div>
     `;
   }
 
   const STAT_CONFIG = {
-    present: { label: "حاضر", icon: "check_circle", color: "success" },
-    late: { label: "متأخر", icon: "schedule", color: "warning" },
-    excused: { label: "مستأذن", icon: "info", color: "secondary" },
-    absent: { label: "غائب", icon: "cancel", color: "error" },
+    present:  { label: "حاضر",    icon: "check_circle", color: "success"   },
+    late:     { label: "متأخر",   icon: "schedule",     color: "warning"   },
+    excused:  { label: "مستأذن",  icon: "info",         color: "secondary" },
+    absent:   { label: "غائب",    icon: "cancel",       color: "error"     },
   };
 
-  // percentages = { present: 83.33, absent: 16.67, late: 0, excused: 0 }
   function renderStatCards(percentages) {
     const container = document.getElementById("statCards");
-
     container.innerHTML = Object.keys(STAT_CONFIG)
       .map((key) => {
         const cfg = STAT_CONFIG[key];
@@ -175,8 +180,7 @@
             </div>
             <p class="text-2xl font-extrabold text-primary">${pct}%</p>
             <p class="text-xs text-on-surface-variant mt-1">${cfg.label}</p>
-          </div>
-        `;
+          </div>`;
       })
       .join("");
   }
@@ -185,10 +189,10 @@
     const canvas = document.getElementById("attendanceChart");
     const labels = ["حاضر", "متأخر", "مستأذن", "غائب"];
     const values = [
-      Math.round(percentages.present || 0),
-      Math.round(percentages.late || 0),
-      Math.round(percentages.excused || 0),
-      Math.round(percentages.absent || 0),
+      Math.round(percentages.present  || 0),
+      Math.round(percentages.late     || 0),
+      Math.round(percentages.excused  || 0),
+      Math.round(percentages.absent   || 0),
     ];
     const colors = ["#1E7D45", "#E67E22", "#C9A23A", "#BA1A1A"];
 
@@ -213,11 +217,12 @@
               <span class="text-sm text-on-surface">${label}</span>
             </div>
             <div class="flex items-center gap-3 w-1/2">
-              <div class="analysis-bar flex-1"><div style="width:${pct}%; background:${colors[i]}"></div></div>
+              <div class="analysis-bar flex-1">
+                <div style="width:${pct}%; background:${colors[i]}"></div>
+              </div>
               <span class="text-xs text-on-surface-variant w-14 text-left">${pct}%</span>
             </div>
-          </div>
-        `;
+          </div>`;
       })
       .join("");
   }
@@ -227,20 +232,20 @@
       <div class="flex-1 flex flex-col items-center justify-center text-center py-12">
         <span class="material-symbols-outlined text-4xl text-error mb-3">error</span>
         <p class="text-on-surface font-medium">${message}</p>
-        <button id="retryBtn" class="mt-4 bg-primary text-on-primary px-4 py-2 rounded-lg text-sm">إعادة المحاولة</button>
-      </div>
-    `;
-    document.getElementById("retryBtn").addEventListener("click", () => loadAll(currentFrom, currentTo));
+        <button id="retryBtn"
+          class="mt-4 bg-primary text-on-primary px-4 py-2 rounded-lg text-sm">
+          إعادة المحاولة
+        </button>
+      </div>`;
+    document.getElementById("retryBtn")
+      .addEventListener("click", () => loadAll(currentFrom, currentTo));
   }
 
-  // Simple, non-blocking toast for download errors so a failed download
-  // doesn't need to blow away the whole report view via renderFatalError.
   function showToast(message, isError) {
     const toast = document.createElement("div");
     toast.textContent = message;
-    toast.className = `fixed bottom-6 inset-x-0 mx-auto w-fit max-w-[90%] px-4 py-2 rounded-lg text-sm shadow-lg z-50 ${
-      isError ? "bg-error text-white" : "bg-primary text-on-primary"
-    }`;
+    toast.className = `fixed bottom-6 inset-x-0 mx-auto w-fit max-w-[90%] px-4 py-2
+      rounded-lg text-sm shadow-lg z-50 ${isError ? "bg-error text-white" : "bg-primary text-on-primary"}`;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3500);
   }
@@ -249,7 +254,7 @@
 
   async function loadAll(from, to) {
     currentFrom = from;
-    currentTo = to;
+    currentTo   = to;
 
     if (!token) {
       renderFatalError("لا يوجد رمز دخول (Bearer token). الرجاء تسجيل الدخول كمسؤول أولاً.");
@@ -260,27 +265,24 @@
     document.getElementById("reportRangeLabel").textContent = `${from} → ${to}`;
 
     const fromPicker = document.getElementById("fromPicker");
-    const toPicker = document.getElementById("toPicker");
+    const toPicker   = document.getElementById("toPicker");
     fromPicker.value = from;
-    toPicker.value = to;
+    toPicker.value   = to;
 
     document.getElementById("refreshBtn").addEventListener("click", () => {
-      const newFrom = fromPicker.value || from;
-      const newTo = toPicker.value || to;
-      loadAll(newFrom, newTo);
+      loadAll(fromPicker.value || from, toPicker.value || to);
     });
 
     const downloadBtn = document.getElementById("downloadBtn");
     downloadBtn.addEventListener("click", async () => {
       const dlFrom = fromPicker.value || currentFrom;
-      const dlTo = toPicker.value || currentTo;
+      const dlTo   = toPicker.value   || currentTo;
 
       downloadBtn.disabled = true;
       const originalHTML = downloadBtn.innerHTML;
       downloadBtn.innerHTML = `
         <span class="material-symbols-outlined text-base animate-spin">progress_activity</span>
-        <span class="hidden md:inline">جاري التحميل...</span>
-      `;
+        <span class="hidden md:inline">جاري التحميل...</span>`;
 
       try {
         await downloadAdminReport(dlFrom, dlTo);
@@ -288,11 +290,12 @@
         console.error(err);
         showToast(err.message, true);
       } finally {
-        downloadBtn.disabled = false;
-        downloadBtn.innerHTML = originalHTML;
+        downloadBtn.disabled    = false;
+        downloadBtn.innerHTML   = originalHTML;
       }
     });
 
+    // ── Attendance report (existing) ────────────────────────────────────────
     try {
       const percentages = await fetchAdminReport(from, to);
       renderStatCards(percentages);
@@ -300,6 +303,13 @@
     } catch (err) {
       console.error(err);
       renderFatalError(err.message);
+      return;  // don't load degrees if the page itself failed
+    }
+
+    // ── Student degrees (new) ───────────────────────────────────────────────
+    // TestsAPI is defined in testsApi.js, loaded before this file.
+    if (window.TestsAPI) {
+      window.TestsAPI.loadStudentDegrees();
     }
   }
 
