@@ -144,6 +144,10 @@
                 method: 'GET',
                 headers: { Authorization: `Bearer ${token}` },
             });
+            let reportsLinkBtn = document.querySelectorAll('.reports-btn');
+                reportsLinkBtn.forEach(e => {
+                    e.href = 'reports-admin.html';
+                })
             const list = (body && body.data) || [];
             return Array.isArray(list) ? list : [];
         } catch (e) {
