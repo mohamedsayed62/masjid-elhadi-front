@@ -155,6 +155,58 @@ function renderStudentDegrees(students) {
     renderError(err.message);
   }
 }
+     // ── download report ────────────────────────────────────────────────────────
 
-  return { loadStudentDegrees };
+  async function downloadAdminReport() {
+    const btn = document.getElementById("downloadReportBtn");
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("opacity-60", "pointer-events-none");
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/reports/download/admin`, {
+        method: "GET",
+        headers: authHeaders(),
+      });
+
+      if (!res.ok) {
+        // try to read an error message if the server sent JSON instead of a file
+        let message = "تعذر تحميل التقرير";
+        try {
+          const json = await res.json();
+          message = json.message || message;
+        } catch (_) {}
+        throw new Error(message);
+      }
+
+      const blob = await res.blob();
+
+      // filename from Content-Disposition header, fallback to a default
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const filename = match ? match[1] : `tests-report-${Date.now()}.xlsx`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("[TestsAPI]", err);
+      alert(err.message || "حدث خطأ أثناء تحميل التقرير");
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove("opacity-60", "pointer-events-none");
+      }
+    }
+  }
+
+  // ── public ─────────────────────────────────────────────────────────────────
+
+  return { loadStudentDegrees, downloadAdminReport };
 })();
