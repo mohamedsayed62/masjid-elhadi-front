@@ -47,6 +47,7 @@ tailwind.config = {
 </head>
 <body class="text-on-surface antialiased min-h-screen flex flex-col md:flex-row relative pb-20 md:pb-0">
 
+<!-- Mobile header -->
 <header class="md:hidden bg-surface-container flex justify-between items-center px-4 py-3 w-full sticky top-0 shadow-sm z-40">
     <div class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -55,11 +56,28 @@ tailwind.config = {
         <h1 class="text-xl font-bold text-primary leading-tight">تقرير المسؤول</h1>
     </div>
     <button
-        id="downloadReportBtn"
+        id="downloadReportBtnMobile"
         onclick="TestsAPI.downloadAdminReport()"
         class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors"
         title="تحميل تقرير الدرجات">
         <span class="material-symbols-outlined text-primary text-xl">download</span>
+    </button>
+</header>
+
+<!-- Desktop header -->
+<header class="hidden md:flex bg-surface-container justify-between items-center px-8 py-4 w-full sticky top-0 shadow-sm z-40">
+    <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+            <span class="material-symbols-outlined text-primary text-2xl">analytics</span>
+        </div>
+        <h1 class="text-xl font-bold text-primary leading-tight">تقرير المسؤول</h1>
+    </div>
+    <button
+        id="downloadReportBtnDesktop"
+        onclick="TestsAPI.downloadAdminReport()"
+        class="flex items-center gap-2 bg-primary text-on-primary px-4 py-2 rounded-xl text-sm font-bold hover:opacity-90 transition-opacity">
+        <span class="material-symbols-outlined text-lg">download</span>
+        تحميل تقرير الدرجات
     </button>
 </header>
 
@@ -68,7 +86,6 @@ tailwind.config = {
         <span class="material-symbols-outlined text-4xl text-outline animate-spin">progress_activity</span>
     </div>
 </main>
-
 <script src="assets/js/reportsAdmin.js"></script>
 <script src="assets/js/test-api.js"></script>
 </body>
