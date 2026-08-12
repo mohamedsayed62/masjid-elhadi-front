@@ -54,6 +54,13 @@ tailwind.config = {
         </div>
         <h1 class="text-xl font-bold text-primary leading-tight">تقرير المسؤول</h1>
     </div>
+    <button
+        id="downloadReportBtn"
+        onclick="TestsAPI.downloadAdminReport()"
+        class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors"
+        title="تحميل تقرير الدرجات">
+        <span class="material-symbols-outlined text-primary text-xl">download</span>
+    </button>
 </header>
 
 <main class="flex-1 flex flex-col w-full max-w-5xl mx-auto px-4 md:px-8 py-6 min-h-screen" id="mainContent">
