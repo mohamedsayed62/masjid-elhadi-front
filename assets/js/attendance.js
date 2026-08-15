@@ -47,6 +47,11 @@
     let isLoadingStudents  = false;
     let isSaving           = false;
 
+    // UX additions -----------------------------------------------------
+    let searchQuery   = '';    // live filter over the student list
+    let showOnlyUnmarked = false; // "focus mode" — only show students not yet marked
+    let searchDebounceTimer = null;
+
     // =====================================================================
     // Auth / mode helpers
     // =====================================================================
@@ -96,10 +101,6 @@
             .then(body => body.data || []);
     }
 
-    /**
-     * FIX #4: sessionNameVal added so the session name captured from the UI
-     * is actually included in the request body instead of being silently dropped.
-     */
     function postAttendance(studentId, day, attend) {
         return apiRequest(CONFIG.ATTENDANCE_ENDPOINT(), {
             method: 'POST',
@@ -148,7 +149,6 @@
         return Array.isArray(body.data) ? body.data : [];
     }
 
-    /** FIX #4: pass sessionName so it reaches postAttendance. */
     async function saveAllRecords(userId, day) {
         const entries = Object.entries(records);
         const results = await Promise.allSettled(
@@ -178,7 +178,7 @@
     }
 
     /** Repaints the chip list; called after adminUsers loads or viewingUserId changes. */
-    function paintAdminPanel() {
+    function paintAdminPanel(loading) {
         if (!adminPanelEl) return;
 
         const owner = viewingUserId
@@ -197,18 +197,22 @@
                         : `<span class="mr-auto text-white/50 text-xs">اختر محفظاً</span>`
                     }
                 </div>
-                <div class="flex gap-2 overflow-x-auto pb-1" id="adminUsersList">
-                    ${adminUsers.length
-                        ? adminUsers.map(u => `
-                            <button type="button"
-                                class="admin-user-chip flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-bold border transition-colors
-                                       ${viewingUserId === u._id
-                                           ? 'bg-secondary text-primary border-secondary'
-                                           : 'bg-white/10 text-white border-white/20 hover:bg-white/20'}"
-                                data-id="${escapeHtml(u._id)}">
-                                ${escapeHtml(u.name)}
-                            </button>`).join('')
-                        : `<span class="text-white/40 text-sm">لا يوجد محفظون</span>`
+                <div class="flex gap-2 overflow-x-auto pb-1" id="adminUsersList" role="tablist" aria-label="اختيار محفظ">
+                    ${loading
+                        ? `<div class="flex gap-2">${'<span class="admin-chip-skeleton"></span>'.repeat(3)}</div>`
+                        : adminUsers.length
+                            ? adminUsers.map(u => `
+                                <button type="button"
+                                    role="tab"
+                                    aria-selected="${viewingUserId === u._id}"
+                                    class="admin-user-chip flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-bold border transition-colors
+                                           ${viewingUserId === u._id
+                                               ? 'bg-secondary text-primary border-secondary'
+                                               : 'bg-white/10 text-white border-white/20 hover:bg-white/20'}"
+                                    data-id="${escapeHtml(u._id)}">
+                                    ${escapeHtml(u.name)}
+                                </button>`).join('')
+                            : `<span class="text-white/40 text-sm">لا يوجد محفظون</span>`
                     }
                 </div>
             </div>
@@ -217,6 +221,7 @@
         document.getElementById('adminUsersList')?.addEventListener('click', e => {
             const chip = e.target.closest('.admin-user-chip');
             if (!chip) return;
+            if (chip.dataset.id === viewingUserId) return;
 
             viewingUserId = chip.dataset.id;
 
@@ -225,6 +230,8 @@
             records            = {};
             existingDayRecords = {};
             selectedDate       = '';
+            searchQuery        = '';
+            showOnlyUnmarked   = false;
 
             paintAdminPanel();
             render();
@@ -235,11 +242,13 @@
         if (!isAdminMode()) return;
 
         injectAdminPanel();         // create the DOM node immediately (shows "اختر محفظاً")
+        paintAdminPanel(true);      // skeleton chips while we fetch
 
         try {
             adminUsers = await fetchAdminUsers();
             paintAdminPanel();      // repaint with the real chip list
         } catch (err) {
+            paintAdminPanel();
             showToast(err.message || 'تعذر تحميل قائمة المحفظين', 'error');
         }
     }
@@ -298,19 +307,32 @@
         });
         const marked = present + absent + excused + late;
         const pct    = marked > 0 ? Math.round(((present + late) / marked) * 100) : 0;
-        return { present, absent, excused, late, unmarked, marked, total: students.length, pct };
+        const completion = students.length > 0 ? Math.round((marked / students.length) * 100) : 0;
+        return { present, absent, excused, late, unmarked, marked, total: students.length, pct, completion };
     }
 
-    /**
-     * FIX #5: Key-order-safe records comparison.
-     * JSON.stringify({ a:1, b:2 }) !== JSON.stringify({ b:2, a:1 }) would
-     * cause false "unsaved changes" warnings after loading from the API.
-     */
     function recordsEqual(a, b) {
         const aKeys = Object.keys(a);
         const bKeys = Object.keys(b);
         if (aKeys.length !== bKeys.length) return false;
         return aKeys.every(k => a[k] === b[k]);
+    }
+
+    function hasUnsavedChanges() {
+        return Object.keys(records).length > 0 && !recordsEqual(records, existingDayRecords);
+    }
+
+    /** Students after search + focus-mode filtering, used only for what's rendered. */
+    function getVisibleStudents() {
+        let list = students;
+        if (showOnlyUnmarked) {
+            list = list.filter(s => !records[String(s._id || s.id)]);
+        }
+        if (searchQuery.trim()) {
+            const q = searchQuery.trim().toLowerCase();
+            list = list.filter(s => (s.name || '').toLowerCase().includes(q));
+        }
+        return list;
     }
 
     // =====================================================================
@@ -321,6 +343,16 @@
         existingDayRecords = await fetchAttendanceForDay(userId, date);
         records            = { ...existingDayRecords };
     }
+
+    // =====================================================================
+    // Warn on tab close / navigation with unsaved marks.
+    // =====================================================================
+    window.addEventListener('beforeunload', (e) => {
+        if (hasUnsavedChanges()) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
 
     // =====================================================================
     // Main render entry point
@@ -367,17 +399,18 @@
 
     // =====================================================================
     // Render: main attendance page
-    // FIX #3: save and restore #studentsList scroll position so that clicking
-    // a student's status button doesn't jump the list back to the top.
     // =====================================================================
     function renderPage() {
         // Save scroll position BEFORE replacing innerHTML
         const listEl         = document.getElementById('studentsList');
         const savedScrollTop = listEl ? listEl.scrollTop : 0;
+        const searchHadFocus = document.activeElement && document.activeElement.id === 'studentSearch';
+        const caretPos        = searchHadFocus ? document.activeElement.selectionStart : null;
 
         const stats       = computeStats();
         const hasExisting = Object.keys(existingDayRecords).length > 0;
         const isFuture    = selectedDate > getTodayISO();
+        const visible     = getVisibleStudents();
 
         mainContent.innerHTML = `
             <section class="mb-5 fade-in">
@@ -391,7 +424,7 @@
                             ${hasExisting ? 'يوجد سجل مسبق لهذا التاريخ' : 'اختر التاريخ وسجّل حضور الطلبة'}
                         </p>
                     </div>
-                    <button onclick="location.href='students.html'"
+                    <button onclick="location.href='students.html'" aria-label="إغلاق"
                         class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center shadow-sm hover:bg-surface-container-low transition-colors">
                         <span class="material-symbols-outlined text-on-surface-variant">close</span>
                     </button>
@@ -411,10 +444,13 @@
             </section>` : ''}
 
             <section class="bg-surface-container rounded-2xl p-5 shadow-sm mb-4 fade-in" style="animation-delay:.05s">
-                <label class="text-label-bold text-on-surface-variant mb-2 block">تاريخ الجلسة</label>
+                <label class="text-label-bold text-on-surface-variant mb-2 block" for="dateInput">تاريخ الجلسة</label>
                 <input type="date" id="dateInput" class="date-input" value="${selectedDate}" max="${getTodayISO()}"/>
                 <div class="flex items-center justify-between mt-3">
                     <p class="text-sm text-primary font-bold" id="dateLabel">${formatArabicDate(selectedDate)}</p>
+                    ${hasUnsavedChanges() ? `<span class="text-xs text-warning font-bold flex items-center gap-1">
+                        <span class="material-symbols-outlined text-sm">fiber_manual_record</span>تعديلات غير محفوظة
+                    </span>` : ''}
                 </div>
                 <div class="flex gap-2 mt-3 overflow-x-auto pb-1">
                     <button class="quick-chip ${selectedDate === getTodayISO()     ? 'active' : ''}" data-date="${getTodayISO()}">اليوم</button>
@@ -438,11 +474,20 @@
                     <div><div class="text-xl font-bold text-secondary">${stats.excused}</div><div class="text-[10px] text-on-surface-variant font-bold">بعذر</div></div>
                     <div><div class="text-xl font-bold text-on-surface-variant">${stats.unmarked}</div><div class="text-[10px] text-on-surface-variant font-bold">لم يُسجَّل</div></div>
                 </div>
-                <div class="mt-3 pt-3 border-t border-outline-variant flex items-center justify-between">
-                    <span class="text-xs text-on-surface-variant font-bold">نسبة الحضور</span>
-                    <span class="text-sm font-bold ${stats.pct >= 70 ? 'text-success' : stats.pct >= 40 ? 'text-secondary' : 'text-error'}">
-                        ${stats.marked > 0 ? stats.pct + '%' : '—'}
-                    </span>
+                <div class="mt-3 pt-3 border-t border-outline-variant">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <span class="text-xs text-on-surface-variant font-bold">اكتمال التسجيل</span>
+                        <span class="text-xs font-bold text-primary">${stats.marked}/${stats.total} (${stats.completion}%)</span>
+                    </div>
+                    <div class="progress-track" role="progressbar" aria-valuenow="${stats.completion}" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-fill" style="width:${stats.completion}%"></div>
+                    </div>
+                    <div class="flex items-center justify-between mt-2">
+                        <span class="text-xs text-on-surface-variant font-bold">نسبة الحضور من المسجَّل</span>
+                        <span class="text-sm font-bold ${stats.pct >= 70 ? 'text-success' : stats.pct >= 40 ? 'text-secondary' : 'text-error'}">
+                            ${stats.marked > 0 ? stats.pct + '%' : '—'}
+                        </span>
+                    </div>
                 </div>
             </section>
 
@@ -462,14 +507,28 @@
             </section>
 
             <section class="bg-surface-container rounded-2xl shadow-sm mb-4 overflow-hidden fade-in" style="animation-delay:.25s">
-                <div class="p-4 border-b border-outline-variant flex items-center justify-between">
-                    <h4 class="text-headline-md text-primary font-bold flex items-center gap-2">
-                        <span class="material-symbols-outlined text-secondary">group</span>الطلبة
-                    </h4>
-                    <span class="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full font-bold">${stats.marked}/${students.length}</span>
+                <div class="p-4 border-b border-outline-variant">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-headline-md text-primary font-bold flex items-center gap-2">
+                            <span class="material-symbols-outlined text-secondary">group</span>الطلبة
+                        </h4>
+                        <span class="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full font-bold">${stats.marked}/${students.length}</span>
+                    </div>
+                    <div class="relative mb-2">
+                        <span class="material-symbols-outlined search-icon">search</span>
+                        <input type="text" id="studentSearch" class="search-input" placeholder="ابحث عن طالب بالاسم..."
+                            value="${escapeHtml(searchQuery)}" autocomplete="off"/>
+                        ${searchQuery ? `<button id="clearSearch" class="clear-search-btn" aria-label="مسح البحث">
+                            <span class="material-symbols-outlined">close</span>
+                        </button>` : ''}
+                    </div>
+                    <button id="toggleUnmarked" class="focus-toggle-chip ${showOnlyUnmarked ? 'active' : ''}">
+                        <span class="material-symbols-outlined text-base">filter_alt</span>
+                        عرض غير المسجَّلين فقط ${stats.unmarked > 0 ? `(${stats.unmarked})` : ''}
+                    </button>
                 </div>
                 <div class="divide-y divide-outline-variant max-h-[60vh] overflow-y-auto" id="studentsList">
-                    ${renderStudentRows()}
+                    ${visible.length ? renderStudentRows(visible) : renderNoSearchResults()}
                 </div>
             </section>
 
@@ -477,7 +536,7 @@
                 <button id="saveBtn"
                     class="w-full ${hasExisting ? 'bg-primary' : 'bg-secondary'} text-white py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     ${stats.marked === 0 || isSaving || isFuture ? 'disabled' : ''}>
-                    <span class="material-symbols-outlined">${isSaving ? 'hourglass_top' : (hasExisting ? 'save' : 'add_circle')}</span>
+                    <span class="material-symbols-outlined ${isSaving ? 'spin' : ''}">${isSaving ? 'progress_activity' : (hasExisting ? 'save' : 'add_circle')}</span>
                     <span>${isSaving ? 'جارٍ الحفظ...' : (hasExisting ? 'تحديث سجل الحضور' : 'حفظ سجل الحضور')}</span>
                     <span class="bg-white/20 px-2 py-0.5 rounded-full text-xs">${stats.marked}/${students.length}</span>
                 </button>
@@ -487,26 +546,36 @@
 
         attachEvents();
 
-        // FIX #3: restore the list's scroll position after the DOM is repainted.
+        // Restore list scroll position after the DOM is repainted.
         if (savedScrollTop > 0) {
             requestAnimationFrame(() => {
                 const newListEl = document.getElementById('studentsList');
                 if (newListEl) newListEl.scrollTop = savedScrollTop;
             });
         }
+
+        // Restore focus + caret to the search box across re-renders (status
+        // toggles and search-typing both call renderPage()).
+        if (searchHadFocus) {
+            const input = document.getElementById('studentSearch');
+            if (input) {
+                input.focus();
+                if (caretPos !== null) input.setSelectionRange(caretPos, caretPos);
+            }
+        }
     }
 
     // =====================================================================
     // Render: student rows
     // =====================================================================
-    function renderStudentRows() {
-        return students.map((s, idx) => {
+    function renderStudentRows(list) {
+        return list.map((s, idx) => {
             const id       = String(s._id || s.id);
             const st       = records[id] || '';
             const rowClass = st ? `marked-${st}` : '';
             return `
                 <div class="student-row ${rowClass} p-4 bg-white" data-student-id="${id}"
-                    style="animation:fadeIn 0.3s ease both;animation-delay:${idx * 20}ms">
+                    style="animation:fadeIn 0.3s ease both;animation-delay:${Math.min(idx, 20) * 20}ms">
                     <div class="flex items-center gap-3 mb-3">
                         <div class="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                             <span class="text-primary font-bold text-sm">${escapeHtml(getInitials(s.name))}</span>
@@ -524,14 +593,22 @@
                         </div>
                     </div>
                     <div class="grid grid-cols-4 gap-2">
-                        <button class="status-btn ${st === 'present' ? 'active-present' : ''}" data-student="${id}" data-status="present"><span class="material-symbols-outlined">check_circle</span>حاضر</button>
-                        <button class="status-btn ${st === 'absent'  ? 'active-absent'  : ''}" data-student="${id}" data-status="absent"><span class="material-symbols-outlined">cancel</span>غائب</button>
-                        <button class="status-btn ${st === 'late'    ? 'active-late'    : ''}" data-student="${id}" data-status="late"><span class="material-symbols-outlined">schedule</span>متأخر</button>
-                        <button class="status-btn ${st === 'excused' ? 'active-excused' : ''}" data-student="${id}" data-status="excused"><span class="material-symbols-outlined">event_available</span>بعذر</button>
+                        <button class="status-btn ${st === 'present' ? 'active-present' : ''}" data-student="${id}" data-status="present" aria-pressed="${st === 'present'}"><span class="material-symbols-outlined">check_circle</span>حاضر</button>
+                        <button class="status-btn ${st === 'absent'  ? 'active-absent'  : ''}" data-student="${id}" data-status="absent" aria-pressed="${st === 'absent'}"><span class="material-symbols-outlined">cancel</span>غائب</button>
+                        <button class="status-btn ${st === 'late'    ? 'active-late'    : ''}" data-student="${id}" data-status="late" aria-pressed="${st === 'late'}"><span class="material-symbols-outlined">schedule</span>متأخر</button>
+                        <button class="status-btn ${st === 'excused' ? 'active-excused' : ''}" data-student="${id}" data-status="excused" aria-pressed="${st === 'excused'}"><span class="material-symbols-outlined">event_available</span>بعذر</button>
                     </div>
                 </div>
             `;
         }).join('');
+    }
+
+    function renderNoSearchResults() {
+        return `
+            <div class="p-10 text-center">
+                <span class="material-symbols-outlined text-4xl text-on-surface-variant/40 mb-2 block">search_off</span>
+                <p class="text-sm text-on-surface-variant">${showOnlyUnmarked ? 'كل الطلبة تم تسجيلهم 🎉' : 'لا يوجد طالب مطابق للبحث'}</p>
+            </div>`;
     }
 
     function getStatusColor(st) {
@@ -572,9 +649,25 @@
             });
         });
 
-        // Session name
-        document.getElementById('sessionNameInput')?.addEventListener('input', e => {
-            sessionName = e.target.value;
+        // Live search (debounced so typing doesn't thrash the DOM)
+        const searchInput = document.getElementById('studentSearch');
+        searchInput?.addEventListener('input', e => {
+            const val = e.target.value;
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => {
+                searchQuery = val;
+                renderPage();
+            }, 150);
+        });
+        document.getElementById('clearSearch')?.addEventListener('click', () => {
+            searchQuery = '';
+            renderPage();
+        });
+
+        // Focus-mode toggle: only show unmarked students
+        document.getElementById('toggleUnmarked')?.addEventListener('click', () => {
+            showOnlyUnmarked = !showOnlyUnmarked;
+            renderPage();
         });
 
         // Per-student status buttons
@@ -591,12 +684,13 @@
         // Bulk action buttons
         document.querySelectorAll('.bulk-action-btn').forEach(btn => {
             btn.addEventListener('click', () => {
+                const targets = getVisibleStudents(); // bulk actions respect current search/filter
                 switch (btn.dataset.bulk) {
-                    case 'present': students.forEach(s => { records[String(s._id || s.id)] = 'present'; }); break;
-                    case 'absent':  students.forEach(s => { records[String(s._id || s.id)] = 'absent';  }); break;
-                    case 'reset':   records = {}; break;
+                    case 'present': targets.forEach(s => { records[String(s._id || s.id)] = 'present'; }); break;
+                    case 'absent':  targets.forEach(s => { records[String(s._id || s.id)] = 'absent';  }); break;
+                    case 'reset':   targets.forEach(s => { delete records[String(s._id || s.id)]; });      break;
                     case 'invert':
-                        students.forEach(s => {
+                        targets.forEach(s => {
                             const sid = String(s._id || s.id);
                             if      (records[sid] === 'present') records[sid] = 'absent';
                             else if (records[sid] === 'absent')  records[sid] = 'present';
@@ -613,20 +707,17 @@
 
     // =====================================================================
     // Date change: warn if unsaved work, then reload records
-    // FIX #5: use recordsEqual() instead of JSON.stringify for comparison
-    // so that key-ordering differences don't trigger false unsaved-changes warnings.
     // =====================================================================
     async function handleDateChange(newDate) {
-        const hasChanges = Object.keys(records).length > 0
-            && !recordsEqual(records, existingDayRecords);
-
-        if (hasChanges) {
+        if (hasUnsavedChanges()) {
             openConfirm(
                 'تغيير التاريخ',
                 'سيتم فقدان التعديلات غير المحفوظة. هل تريد المتابعة؟',
                 'warning',
                 async () => {
                     selectedDate = newDate;
+                    searchQuery = '';
+                    showOnlyUnmarked = false;
                     renderLoading();
                     await loadRecordsForDate(selectedDate);
                     renderPage();
@@ -634,6 +725,8 @@
             );
         } else {
             selectedDate = newDate;
+            searchQuery = '';
+            showOnlyUnmarked = false;
             renderLoading();
             await loadRecordsForDate(selectedDate);
             renderPage();
@@ -668,8 +761,6 @@
         try {
             const { total, failed } = await saveAllRecords(userId, selectedDate);
             if (failed === 0) {
-                // FIX #1 + #2: sync existingDayRecords so the editing banner reflects
-                // the saved state and the unsaved-changes check stays accurate.
                 existingDayRecords = { ...records };
                 showToast('✓ تم حفظ سجل الحضور بنجاح', 'success');
             } else if (failed < total) {
@@ -681,7 +772,6 @@
             showToast(err.message || 'حدث خطأ أثناء الحفظ', 'error');
         } finally {
             isSaving = false;
-            // FIX #1: always re-render after save so the UI exits the "جارٍ الحفظ..." state.
             renderPage();
         }
     }
@@ -707,6 +797,7 @@
         }
         confirmModal.classList.remove('hidden');
         confirmModal.classList.add('flex');
+        okConfirm.focus();
     }
 
     function closeConfirm() {
@@ -726,10 +817,13 @@
     // Empty / loading / error states
     // =====================================================================
     function renderLoading() {
+        // Skeleton rows read as "content is coming" far better than a bare spinner.
         mainContent.innerHTML = `
-            <section class="flex-1 flex flex-col items-center justify-center py-24 fade-in">
-                <div class="spinner mb-4"></div>
-                <p class="text-body-md text-on-surface-variant">جارٍ تحميل البيانات...</p>
+            <section class="space-y-3">
+                <div class="skeleton-block h-8 w-2/3 rounded-lg"></div>
+                <div class="skeleton-block h-24 rounded-2xl"></div>
+                <div class="skeleton-block h-20 rounded-2xl"></div>
+                ${'<div class="skeleton-block h-20 rounded-2xl"></div>'.repeat(4)}
             </section>`;
     }
 
