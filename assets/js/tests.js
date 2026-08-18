@@ -185,6 +185,10 @@
                 headers: { Authorization: `Bearer ${token}` },
             });
             const list = (body && body.data) || [];
+            let reportsLinkBtn = document.querySelectorAll('.reports-btn');
+            reportsLinkBtn.forEach(e => {
+                e.href = 'reports-admin.html';
+            })
             return Array.isArray(list) ? list : [];
         } catch (e) {
             return [];
