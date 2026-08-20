@@ -2,1030 +2,783 @@
     'use strict';
 
     // =====================================================================
-    // CONFIG — adjust these to match your real backend
+    // CONFIG
     // =====================================================================
+    // API base can be overridden per-environment via a small inline script
+    // before this file loads:  window.__APP_CONFIG__ = { apiBaseUrl: '...' }
+    // Falls back to the previous hardcoded dev value so nothing breaks if
+    // that override is absent.
     const CONFIG = {
         API_BASE_URL: 'https://masjid-nodejs-production.up.railway.app/api',
-
-        // Same pattern as attendance.js
-        STUDENTS_ENDPOINT: (userId) => `/students/${userId}`,
-
-        // Fetch every evaluation record for this محفظ's students.
-        // Matches: GET /tests/:userId  ->  getTests(req.params.userId)
-        EVALUATIONS_ENDPOINT: (userId) => `/tests/${userId}`,
-
-        // Save degrees. Matches: POST /tests  ->  storeTests(req.body: array)
-        SAVE_EVALUATION_ENDPOINT: () => `/tests`,
-
-        // Admin-only: list every محفظ/user so an admin can pick whose
-        // students to view degrees for. Matches: GET /users/admin/getUsers
-        // Requires Authorization: Bearer <admin_token>
-        ADMIN_USERS_ENDPOINT: () => `/users/admin/getUsers`,
-
-        // Subjects (المواد) are managed client-side only, per your request.
-        SUBJECTS_STORAGE_KEY: 'eval_subjects',
-
-        // GET /tests/:userId only returns an aggregated totalDegree per
-        // student — no per-subject breakdown. We cache what YOU enter per
-        // subject locally so the modal can still show/prefill it on this
-        // device; totalDegree from the server always stays the source of
-        // truth for totals/leaderboard/averages.
-        DEGREE_CACHE_STORAGE_KEY: 'eval_degree_cache',
+        TESTS_ENDPOINT:       (userId) => `/tests/${userId}`,   // GET  — all test/degree records for a محفظ's students
+        STORE_TESTS_ENDPOINT: ()       => `/tests`,             // POST — array of { student_id, name, degree }
+        ADMIN_USERS_ENDPOINT: '/users/admin/getUsers',          // GET  — requires Authorization: Bearer <token>
+        // Soft sanity check only — we don't know each subject's real scale
+        // (out of 10? out of 100?), so we warn instead of blocking.
+        DEGREE_SANITY_CEILING: 100,
     };
 
-    // LocalStorage keys — must match whatever the login screens write.
-    const ACTIVE_USER_ID_KEY   = 'active_user_id';
-    const ACTIVE_USER_NAME_KEY = 'active_user_name'; // set at login if available; may be absent
-    const ADMIN_TOKEN_KEY      = 'admin_token';      // set by admin login; absent for regular محفظ
+    // Must match whatever the login screens write.
+    const ACTIVE_USER_ID_KEY = 'active_user_id';
+    const ADMIN_TOKEN_KEY    = 'admin_token';
+
+    // Fallback subjects offered before any real data has loaded.
+    const DEFAULT_SUBJECTS = ["القرآن الكريم", "الحديث الشريف شفوي", "الحديث الشريف تحريري", "السلوك"];
 
     // =====================================================================
     // DOM refs
     // =====================================================================
-    const mainContent = document.getElementById('mainContent');
+    const mainContent    = document.getElementById('mainContent');
     const headerSubtitle = document.getElementById('headerSubtitle');
-    const sideName = document.getElementById('sideName');
-    const toast = document.getElementById('toast');
+    const sideName       = document.getElementById('sideName');
+    const toast          = document.getElementById('toast');
 
-    const degreeModal = document.getElementById('degreeModal');
-    const modalAvatar = document.getElementById('modalAvatar');
-    const modalInitials = document.getElementById('modalInitials');
+    const degreeModal      = document.getElementById('degreeModal');
+    const modalAvatar      = document.getElementById('modalAvatar');
+    const modalInitials    = document.getElementById('modalInitials');
     const modalStudentName = document.getElementById('modalStudentName');
     const modalStudentMeta = document.getElementById('modalStudentMeta');
-    const modalSubjectsList = document.getElementById('modalSubjectsList');
-    const modalNoSubjects = document.getElementById('modalNoSubjects');
-    const closeModalBtn = document.getElementById('closeModal');
-    const saveDegreesBtn = document.getElementById('saveDegreesBtn');
+    const modalSubjectsList= document.getElementById('modalSubjectsList');
+    const modalNoSubjects  = document.getElementById('modalNoSubjects');
+    const closeModalBtn    = document.getElementById('closeModal');
+    const saveDegreesBtn   = document.getElementById('saveDegreesBtn');
     const saveDegreesBtnText = document.getElementById('saveDegreesBtnText');
+
+    // Toast needs to actually announce itself to screen readers.
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.setAttribute('aria-atomic', 'true');
 
     // =====================================================================
     // State
     // =====================================================================
-    let currentUserId = localStorage.getItem(ACTIVE_USER_ID_KEY);
-    let currentUserName = '';
-    let students = [];
-    let subjects = [];                 // ['حفظ', 'تجويد', ...]
-    let totalsMap = {};                // { studentId: totalDegree } — from the server, source of truth
-    let degreeCache = {};              // { studentId: { subjectName: degree } } — local-only, for modal prefill
-    let activeStudentId = null;        // student currently open in the modal
-    let lastFocusedElement = null;     // to restore focus after modal closes
+    let adminUsers    = [];   // list of محفظين — admin mode only
+    let viewingUserId = null; // محفظ currently selected by the admin
 
-    // --- grid controls -----------------------------------------------
-    let searchQuery = '';
-    let sortMode = 'name';             // 'name' | 'avg_desc' | 'avg_asc' | 'unrated'
+    let students          = [];        // raw records from GET /tests/{userId}
+    let searchQuery        = '';
+    let subjectFilter       = '';       // '' = all subjects
+    let isLoadingStudents  = false;
+    let isSaving           = false;
 
-    // --- admin / user-switching state -----------------------------
-    let allUsers = [];                  // list of محفظين returned by the admin endpoint (admin only)
-    let viewingUserId = null;           // whose students/degrees are currently shown.
-                                         // Regular محفظ: set to currentUserId immediately.
-                                         // Admin: stays null until they click a محفظ chip —
-                                         // no student data loads before that click.
+    let subjectSuggestions = new Set(DEFAULT_SUBJECTS); // grows from real data + session additions
 
-    let isLoading = false;
-    let isGridLoading = false;          // true while switching admin mentor: keeps subjects/toolbar visible
-    let isSavingDegrees = false;
+    let activeStudent   = null;  // student currently open in the modal
+    let modalSubjects   = [];    // working copy: [{ id, name, degree, isNew }]
+    let modalSnapshot    = '';    // JSON snapshot at open time, to detect unsaved edits
+    let lastFocusedEl    = null;  // element to restore focus to after modal closes
+
+    let searchDebounceTimer = null;
 
     // =====================================================================
-    // Auth / mode helpers — same pattern as attendance.js
+    // Auth / mode helpers
     // =====================================================================
-    function getActiveUserId() {
-        return localStorage.getItem(ACTIVE_USER_ID_KEY);
-    }
-
-    /** Mentor's display name, if the login flow saved one locally. */
-    function getActiveUserName() {
-        return localStorage.getItem(ACTIVE_USER_NAME_KEY) || '';
-    }
-
-    // Best-effort extraction of a mentor/owner name from a students-endpoint
-    // response, so we have a fallback when it isn't cached in localStorage.
-    // Checked in order of likelihood; harmless if none match (body.data is
-    // normally an array, so body.data.name / body.data.user are just undefined).
-    function extractNameFromResponse(body) {
-        if (!body) return '';
-        const candidates = [
-            body.name,
-            body.user && body.user.name,
-            body.mentor && body.mentor.name,
-            body.data && body.data.name,
-            body.data && body.data.user && body.data.user.name,
-        ];
-        const found = candidates.find((v) => typeof v === 'string' && v.trim());
-        return found ? found.trim() : '';
-    }
-
-    function getAdminToken() {
-        return localStorage.getItem(ADMIN_TOKEN_KEY);
-    }
-
-    /** True when an admin JWT is present in localStorage. */
-    function isAdminMode() {
-        return !!getAdminToken();
-    }
+    function getActiveUserId() { return localStorage.getItem(ACTIVE_USER_ID_KEY); }
+    function getAdminToken()   { return localStorage.getItem(ADMIN_TOKEN_KEY); }
+    function isAdminMode()     { return !!getAdminToken(); }
+    function getEffectiveUserId() { return viewingUserId || getActiveUserId(); }
 
     // =====================================================================
     // API layer
     // =====================================================================
     async function apiRequest(path, options = {}) {
         const { headers: extraHeaders, ...restOptions } = options;
-        const res = await fetch(CONFIG.API_BASE_URL + path, {
-            headers: { 'Content-Type': 'application/json', ...(extraHeaders || {}) },
-            ...restOptions,
-        });
+        let res;
+        try {
+            res = await fetch(CONFIG.API_BASE_URL + path, {
+                headers: { 'Content-Type': 'application/json', ...(extraHeaders || {}) },
+                ...restOptions,
+            });
+        } catch (networkErr) {
+            // fetch() throws (not just rejects with res.ok=false) when the
+            // network is down entirely — give that a distinct, friendly message.
+            throw new Error('تعذّر الاتصال بالخادم. تحقق من اتصال الإنترنت وحاول مجددًا.');
+        }
 
         let body = null;
-        try { body = await res.json(); } catch (e) { /* no body */ }
+        try { body = await res.json(); } catch (_) { /* no body */ }
 
         if (!res.ok || (body && body.status && body.status !== 'success')) {
-            const message = (body && body.message) || `فشل الطلب (${res.status})`;
-            throw new Error(message);
+            throw new Error((body && body.message) || `فشل الطلب (${res.status})`);
         }
         return body;
     }
 
-    function fetchStudents(userId) {
-        return apiRequest(CONFIG.STUDENTS_ENDPOINT(userId), { method: 'GET' })
-          .then((body) => ({
-              list: (body && body.data) || [],
-              name: extractNameFromResponse(body),
-          }));
+    function fetchTests(userId) {
+        return apiRequest(CONFIG.TESTS_ENDPOINT(userId), { method: 'GET' })
+            .then(body => body.data || []);
     }
 
-    async function fetchEvaluations(userId) {
-        try {
-            const body = await apiRequest(CONFIG.EVALUATIONS_ENDPOINT(userId), {
-                method: 'GET',
-            });
-            return (body && body.data) || [];
-        } catch (e) {
-            // No evaluations recorded yet — treat as empty, not an error
-            return [];
-        }
-    }
-
-    // Backend expects ONE request with an array body:
-    // [ { student_id, name, degree }, { student_id, name, degree }, ... ]
-    function saveEvaluations(rows) {
-        return apiRequest(CONFIG.SAVE_EVALUATION_ENDPOINT(), {
+    function postTests(entries) {
+        return apiRequest(CONFIG.STORE_TESTS_ENDPOINT(), {
             method: 'POST',
-            body: JSON.stringify(rows),
+            body: JSON.stringify(entries),
         });
     }
 
-    /**
-     * GET /users/admin/getUsers — requires admin Bearer token.
-     * Only called when isAdminMode() is true. Returns [] on failure
-     * rather than throwing, so a bad/expired token doesn't break the page.
-     */
     async function fetchAdminUsers() {
-        if (!isAdminMode()) return [];
         const token = getAdminToken();
-        try {
-            const body = await apiRequest(CONFIG.ADMIN_USERS_ENDPOINT(), {
-                method: 'GET',
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            const list = (body && body.data) || [];
-            let reportsLinkBtn = document.querySelectorAll('.reports-btn');
-            reportsLinkBtn.forEach(e => {
-                e.href = 'reports-admin.html';
-            })
-            return Array.isArray(list) ? list : [];
-        } catch (e) {
-            return [];
-        }
-    }
-
-    // =====================================================================
-    // Subjects (localStorage)
-    // =====================================================================
-    function loadSubjects() {
-        try {
-            const raw = localStorage.getItem(CONFIG.SUBJECTS_STORAGE_KEY);
-            const parsed = raw ? JSON.parse(raw) : [];
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-            return [];
-        }
-    }
-
-    function persistSubjects() {
-        localStorage.setItem(CONFIG.SUBJECTS_STORAGE_KEY, JSON.stringify(subjects));
-    }
-
-    function addSubject(name) {
-        const trimmed = (name || '').trim();
-        if (!trimmed) return;
-        if (subjects.some((s) => s.toLowerCase() === trimmed.toLowerCase())) {
-            showToast('هذه المادة مضافة بالفعل', 'warning');
-            return;
-        }
-        subjects.push(trimmed);
-        persistSubjects();
-        showToast(`✓ تمت إضافة "${trimmed}"`, 'success');
-        renderPage();
-    }
-
-    function removeSubject(name) {
-        const ok = window.confirm(`إزالة "${name}" من قائمة المواد؟ لن يحذف هذا الدرجات المُسجَّلة مسبقًا لهذه المادة.`);
-        if (!ok) return;
-        subjects = subjects.filter((s) => s !== name);
-        persistSubjects();
-        renderPage();
-    }
-
-    // =====================================================================
-    // Per-subject degree cache (localStorage) — see DEGREE_CACHE_STORAGE_KEY
-    // comment above for why this exists.
-    // =====================================================================
-    function loadDegreeCache() {
-        try {
-            const raw = localStorage.getItem(CONFIG.DEGREE_CACHE_STORAGE_KEY);
-            const parsed = raw ? JSON.parse(raw) : {};
-            return (parsed && typeof parsed === 'object') ? parsed : {};
-        } catch (e) {
-            return {};
-        }
-    }
-
-    function persistDegreeCache() {
-        localStorage.setItem(CONFIG.DEGREE_CACHE_STORAGE_KEY, JSON.stringify(degreeCache));
-    }
-
-    function cacheDegrees(studentId, rows) {
-        // rows: [{ subject, degree }, ...]
-        if (!degreeCache[studentId]) degreeCache[studentId] = {};
-        rows.forEach((row) => { degreeCache[studentId][row.subject] = row.degree; });
-        persistDegreeCache();
-    }
-
-    // =====================================================================
-    // Evaluation data helpers
-    // =====================================================================
-    // Extract a plain id whether student_id came back populated (object) or as a raw id.
-    function studentIdOf(rec) {
-        if (rec.student_id && typeof rec.student_id === 'object') return String(rec.student_id._id);
-        return String(rec.student_id);
-    }
-
-    // GET /tests/:userId returns ONE row per student — an already-aggregated
-    // totalDegree, plus the student's own name (not a subject!). There is no
-    // per-subject breakdown in this response, so we just map studentId -> total.
-    function buildTotalsMap(records) {
-        const map = {};
-        (records || []).forEach((rec) => {
-            const sid = studentIdOf(rec);
-            const total = Number(rec.totalDegree);
-            map[sid] = isNaN(total) ? 0 : total;
+        const body  = await apiRequest(CONFIG.ADMIN_USERS_ENDPOINT, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}` },
         });
-        return map;
+        document.querySelectorAll('.reports-btn').forEach(e => { e.href = 'reports-admin.html'; });
+        return Array.isArray(body.data) ? body.data : [];
     }
 
-    // Local-only per-subject values (see degreeCache above). Used purely to
-    // prefill the modal / show a subject count on this device — never as the
-    // source of truth for totals, since the server doesn't echo them back.
-    function studentSubjectDegrees(studentId) {
-        return degreeCache[studentId] || {};
+    // =====================================================================
+    // Admin panel — same pattern used across the app so switching محفظ feels
+    // identical on every page. Injected as a sibling BEFORE mainContent.
+    // =====================================================================
+    let adminPanelEl = null;
+
+    function injectAdminPanel() {
+        if (!isAdminMode() || adminPanelEl) return;
+        adminPanelEl = document.createElement('div');
+        adminPanelEl.id        = 'adminPanel';
+        adminPanelEl.className = 'w-full max-w-4xl mx-auto px-4 md:px-8 pt-4';
+        mainContent.parentNode.insertBefore(adminPanelEl, mainContent);
+        paintAdminPanel();
     }
 
-    // Trim to 2 decimals and drop trailing zeros (backend returns decimals
-    // like 8.82 / 58.33, not whole percentages).
-    function formatDegree(n) {
-        const num = Number(n);
-        if (isNaN(num)) return '0';
-        return String(Math.round(num * 100) / 100);
+    function paintAdminPanel(loading) {
+        if (!adminPanelEl) return;
+        const owner = viewingUserId ? adminUsers.find(u => u._id === viewingUserId) : null;
+
+        adminPanelEl.innerHTML = `
+            <div class="bg-primary rounded-2xl p-4 shadow-sm mb-3 fade-in">
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="material-symbols-outlined text-secondary">admin_panel_settings</span>
+                    <h4 class="text-white font-bold text-sm">لوحة الإدارة</h4>
+                    ${owner
+                        ? `<span class="mr-auto bg-secondary text-primary text-xs font-bold px-3 py-1 rounded-full">${escapeHtml(owner.name)}</span>`
+                        : `<span class="mr-auto text-white/50 text-xs">اختر محفظاً</span>`}
+                </div>
+                <div class="flex gap-2 overflow-x-auto pb-1" id="adminUsersList" role="tablist" aria-label="اختيار محفظ">
+                    ${loading
+                        ? `<div class="flex gap-2">${'<span class="admin-chip-skeleton"></span>'.repeat(3)}</div>`
+                        : adminUsers.length
+                            ? adminUsers.map(u => `
+                                <button type="button" role="tab" aria-selected="${viewingUserId === u._id}"
+                                    class="admin-user-chip flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-bold border transition-colors
+                                           ${viewingUserId === u._id
+                                               ? 'bg-secondary text-primary border-secondary'
+                                               : 'bg-white/10 text-white border-white/20 hover:bg-white/20'}"
+                                    data-id="${escapeHtml(u._id)}">${escapeHtml(u.name)}</button>`).join('')
+                            : `<span class="text-white/40 text-sm">لا يوجد محفظون</span>`}
+                </div>
+            </div>`;
+
+        document.getElementById('adminUsersList')?.addEventListener('click', e => {
+            const chip = e.target.closest('.admin-user-chip');
+            if (!chip || chip.dataset.id === viewingUserId) return;
+
+            viewingUserId  = chip.dataset.id;
+            students       = [];
+            searchQuery    = '';
+            subjectFilter  = '';
+
+            paintAdminPanel();
+            render();
+        });
     }
 
-    // Server-truth total for a student. Falls back to summing the local
-    // subject cache only if the server hasn't returned a total yet for this
-    // student (e.g. brand new, or a request just failed).
-    function studentTotal(studentId) {
-        if (totalsMap[studentId] !== undefined) return totalsMap[studentId];
-        const entries = Object.values(studentSubjectDegrees(studentId));
-        return entries.reduce((sum, d) => sum + (Number(d) || 0), 0);
-    }
-
-    // "Average" here is really just a display value for the ring/leaderboard.
-    // If we know the local subject breakdown, average across those entries;
-    // otherwise fall back to showing the server total directly (we don't know
-    // how many subjects contributed to it), and only show — if there's
-    // genuinely nothing recorded.
-    function studentAverage(studentId) {
-        const cached = Object.values(studentSubjectDegrees(studentId));
-        if (cached.length > 0) {
-            const sum = cached.reduce((s, d) => s + (Number(d) || 0), 0);
-            return Math.round((sum / cached.length) * 100) / 100;
+    async function initAdminPanel() {
+        if (!isAdminMode()) return;
+        injectAdminPanel();
+        paintAdminPanel(true);
+        try {
+            adminUsers = await fetchAdminUsers();
+            paintAdminPanel();
+        } catch (err) {
+            paintAdminPanel();
+            showToast(err.message || 'تعذر تحميل قائمة المحفظين', 'error');
         }
-        const total = studentTotal(studentId);
-        return total > 0 ? total : null;
-    }
-
-    function topStudents(limit) {
-        return students
-            .map((s) => ({ student: s, total: studentTotal(String(s._id || s.id)) }))
-            .filter((r) => r.total > 0)
-            .sort((a, b) => b.total - a.total)
-            .slice(0, limit);
-    }
-
-    // Applies the search box + sort dropdown to the current student list,
-    // without mutating the underlying `students` array.
-    function visibleStudents() {
-        let list = students.slice();
-
-        const q = searchQuery.trim().toLowerCase();
-        if (q) {
-            list = list.filter((s) => (s.name || '').toLowerCase().includes(q));
-        }
-
-        const avgOf = (s) => studentAverage(String(s._id || s.id));
-
-        switch (sortMode) {
-            case 'avg_desc':
-                list.sort((a, b) => (avgOf(b) ?? -1) - (avgOf(a) ?? -1));
-                break;
-            case 'avg_asc':
-                list.sort((a, b) => {
-                    const av = avgOf(a), bv = avgOf(b);
-                    if (av === null && bv === null) return 0;
-                    if (av === null) return 1;
-                    if (bv === null) return -1;
-                    return av - bv;
-                });
-                break;
-            case 'unrated':
-                list.sort((a, b) => {
-                    const av = avgOf(a) === null ? 0 : 1;
-                    const bv = avgOf(b) === null ? 0 : 1;
-                    return av - bv;
-                });
-                break;
-            case 'name':
-            default:
-                list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
-        }
-
-        return list;
     }
 
     // =====================================================================
     // Helpers
     // =====================================================================
     function escapeHtml(str) {
-        if (!str) return '';
+        if (!str && str !== 0) return '';
         const div = document.createElement('div');
-        div.textContent = str;
+        div.textContent = String(str);
         return div.innerHTML;
     }
 
     function getInitials(name) {
         const parts = (name || '').trim().split(/\s+/);
         if (parts.length >= 2) return parts[0][0] + parts[1][0];
-        return parts[0][0] || '?';
+        return parts[0]?.[0] || '?';
     }
-
-    const TOAST_ICONS = {
-        success: 'check_circle',
-        error: 'error',
-        warning: 'warning',
-        info: 'info',
-    };
 
     function showToast(message, type) {
-        const icon = TOAST_ICONS[type] || TOAST_ICONS.info;
-        toast.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">${icon}</span><span>${escapeHtml(message)}</span>`;
-        toast.className = 'toast show' + (type ? ' ' + type : '');
-        clearTimeout(showToast._t);
-        showToast._t = setTimeout(() => toast.classList.remove('show'), 2800);
+        toast.textContent = message;
+        toast.className   = 'toast show' + (type ? ' ' + type : '');
+        setTimeout(() => toast.classList.remove('show'), 2800);
     }
 
-    function ringColor(avg) {
-        if (avg === null) return { bg: '#e2e2e2', fg: '#44474d' };
-        if (avg >= 80) return { bg: '#d4f5dd', fg: '#1E7D45' };
-        if (avg >= 50) return { bg: '#fdd265', fg: '#755900' };
-        return { bg: '#ffdad6', fg: '#BA1A1A' };
+    function formatDegree(n) {
+        const num = Number(n) || 0;
+        return Number.isInteger(num) ? String(num) : num.toFixed(2).replace(/\.?0+$/, '');
     }
 
-    function degreeInputClass(val) {
-        if (val === '' || val === null || isNaN(val)) return '';
-        const n = Number(val);
-        if (n >= 80) return 'deg-high';
-        if (n >= 50) return 'deg-mid';
-        return 'deg-low';
+    function getStudentId(s) { return String(s.student_id || s._id || s.id); }
+
+    /** Unique, sorted subject names currently held in `students`. */
+    function collectSubjectsFromStudents(list) {
+        const set = new Set();
+        list.forEach(s => (s.subjects || []).forEach(sub => { if (sub.name) set.add(sub.name); }));
+        return set;
+    }
+
+    /** Class-best (max) degree per subject name — used for relative grading colors. */
+    function computeSubjectMaxes(list) {
+        const maxes = {};
+        list.forEach(s => (s.subjects || []).forEach(sub => {
+            const d = Number(sub.degree) || 0;
+            if (!(sub.name in maxes) || d > maxes[sub.name]) maxes[sub.name] = d;
+        }));
+        return maxes;
+    }
+
+    function gradeColorClasses(degree, max) {
+        const ratio = max > 0 ? degree / max : 0;
+        if (ratio >= 0.85) return 'bg-success-container text-success';
+        if (ratio >= 0.6)  return 'bg-secondary-container text-on-secondary-container';
+        if (ratio >= 0.4)  return 'bg-warning/10 text-warning';
+        return 'bg-error-container text-error';
+    }
+
+    function computeStats() {
+        const totals = students.map(s => Number(s.totalDegree) || 0);
+        const totalStudents = students.length;
+        const avg = totalStudents ? totals.reduce((a, b) => a + b, 0) / totalStudents : 0;
+        const max = totalStudents ? Math.max(...totals) : 0;
+        const subjectsCount = collectSubjectsFromStudents(students).size;
+        return { totalStudents, avg, max, subjectsCount };
+    }
+
+    function getTopStudents(n) {
+        return [...students]
+            .sort((a, b) => (Number(b.totalDegree) || 0) - (Number(a.totalDegree) || 0))
+            .slice(0, n);
+    }
+
+    function getVisibleStudents() {
+        let ranked = [...students].sort((a, b) => (Number(b.totalDegree) || 0) - (Number(a.totalDegree) || 0));
+
+        if (subjectFilter) {
+            ranked = ranked.filter(s => (s.subjects || []).some(sub => sub.name === subjectFilter));
+        }
+        if (searchQuery.trim()) {
+            const q = searchQuery.trim().toLowerCase();
+            ranked = ranked.filter(s => (s.name || '').toLowerCase().includes(q));
+        }
+        return ranked;
     }
 
     // =====================================================================
-    // Load
+    // Subject suggestions <datalist> — injected once, refreshed as data grows
+    // =====================================================================
+    let subjectDatalistEl = null;
+
+    function ensureSubjectDatalist() {
+        if (subjectDatalistEl) return;
+        subjectDatalistEl = document.createElement('datalist');
+        subjectDatalistEl.id = 'subjectSuggestionsList';
+        document.body.appendChild(subjectDatalistEl);
+    }
+
+    function refreshSubjectDatalist() {
+        ensureSubjectDatalist();
+        subjectDatalistEl.innerHTML = [...subjectSuggestions]
+            .sort((a, b) => a.localeCompare(b, 'ar'))
+            .map(name => `<option value="${escapeHtml(name)}"></option>`)
+            .join('');
+    }
+
+    function registerSubjectName(name) {
+        const trimmed = (name || '').trim();
+        if (!trimmed) return;
+        if (!subjectSuggestions.has(trimmed)) {
+            subjectSuggestions.add(trimmed);
+            refreshSubjectDatalist();
+        }
+    }
+
+    // =====================================================================
+    // Data loading
+    // =====================================================================
+    async function loadStudents(userId) {
+        students = await fetchTests(userId);
+        collectSubjectsFromStudents(students).forEach(name => subjectSuggestions.add(name));
+        refreshSubjectDatalist();
+    }
+
+    // =====================================================================
+    // Main render entry point
     // =====================================================================
     async function render() {
-        currentUserId = getActiveUserId();
+        const userId = getEffectiveUserId();
 
-        // =========================
-        // Admin
-        // =========================
-        if (isAdminMode()) {
-            subjects = loadSubjects();
-
-            renderLoading();
-
-            allUsers = await fetchAdminUsers();
-
-            viewingUserId = null;
-
-            sideName.textContent = 'لوحة الإدارة';
-            headerSubtitle.textContent = 'اختر محفظاً';
-
-            renderSelectMentor();
-
+        if (!userId) {
+            headerSubtitle.textContent = isAdminMode() ? 'اختر محفظاً' : 'غير مسجل';
+            sideName.textContent       = isAdminMode() ? 'لوحة الإدارة' : '—';
+            isAdminMode() ? renderSelectMentor() : renderNoUser();
             return;
         }
 
-        // =========================
-        // Regular محفظ
-        // =========================
-        if (!currentUserId) {
-            renderNoUser();
-            return;
+        if (isAdminMode() && viewingUserId) {
+            const owner = adminUsers.find(u => u._id === viewingUserId);
+            if (owner) sideName.textContent = owner.name;
         }
-
-        subjects = loadSubjects();
-
-        allUsers = [];
-        viewingUserId = currentUserId;
 
         renderLoading();
-        isLoading = true;
+        isLoadingStudents = true;
 
         try {
-            await loadDataForUser(viewingUserId);
+            await loadStudents(userId);
         } catch (err) {
-            isLoading = false;
+            isLoadingStudents = false;
             renderError(err.message);
             return;
         }
-
-        isLoading = false;
-
-        if (students.length === 0) {
-            renderNoStudents();
-            return;
-        }
-
-        renderPage();
-    }
-
-    // Fetch students + their test/degree records for a given user,
-    // and populate students/totalsMap/header. Reused both on initial render
-    // and whenever an admin switches the selected محفظ.
-    async function loadDataForUser(userId) {
-        const [studentsRes, evaluationsRes] = await Promise.all([
-            fetchStudents(userId),
-            fetchEvaluations(userId),
-        ]);
-        students = studentsRes.list;
-        totalsMap = buildTotalsMap(evaluationsRes); // <-- totalDegree per student, from GET /tests/:userId
-        degreeCache = loadDegreeCache();             // <-- local per-subject breakdown, if any was saved on this device
-
-        if (isAdminMode()) {
-            // Admin viewing someone else's students: the admin user list is
-            // the authoritative source for that person's name.
-            const owner = allUsers.find((u) => String(u._id || u.id) === String(userId));
-            currentUserName = (owner && owner.name) || studentsRes.name || currentUserName || 'محفظ غير معروف';
-        } else {
-            // Regular محفظ viewing their own students: prefer whatever was
-            // cached at login; if that's missing, fall back to the name
-            // surfaced in the students response and cache it for next time.
-            const saved = getActiveUserName();
-            currentUserName = saved || studentsRes.name || currentUserName || 'المحفظ';
-            if (!saved && studentsRes.name) {
-                localStorage.setItem(ACTIVE_USER_NAME_KEY, studentsRes.name);
-            }
-        }
+        isLoadingStudents = false;
 
         headerSubtitle.textContent = `الطلبة: ${students.length}`;
-        sideName.textContent = currentUserName;
-    }
-
-    // Called when the admin clicks a محفظ chip — either from the initial
-    // mentor-selection screen or the small switcher shown atop the page.
-    // Keeps the subjects manager + toolbar mounted and only shows a
-    // skeleton in the grid/leaderboard area, so the page doesn't reset.
-    async function switchViewingUser(userId) {
-        if (!userId || userId === viewingUserId) return;
-        viewingUserId = userId;
-        searchQuery = '';
-
-        if (mainContent.querySelector('#studentsGrid')) {
-            isGridLoading = true;
-            renderPage();
-        } else {
-            renderLoading();
-        }
-
-        try {
-            await loadDataForUser(viewingUserId);
-        } catch (err) {
-            isGridLoading = false;
-            renderError(err.message);
-            return;
-        }
-
-        isGridLoading = false;
 
         if (students.length === 0) {
             renderNoStudents();
             return;
         }
+
         renderPage();
-    }
-
-    function mentorChips() {
-        return `
-            <div class="flex gap-2 overflow-x-auto pb-1" id="adminUsersList" role="group" aria-label="اختيار المحفظ">
-                ${allUsers.length
-                    ? allUsers.map((u) => {
-                        const uid = String(u._id || u.id);
-                        const active = String(viewingUserId) === uid;
-                        return `
-                            <button type="button"
-                                class="admin-user-chip flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-bold border transition-colors
-                                       ${active ? 'bg-secondary text-primary border-secondary' : 'bg-white/10 text-white border-white/20 hover:bg-white/20'}"
-                                aria-pressed="${active}"
-                                data-id="${escapeHtml(uid)}">
-                                ${escapeHtml(u.name || u.username || uid)}
-                            </button>`;
-                      }).join('')
-                    : `<span class="text-white/40 text-sm">لا يوجد محفظون</span>`
-                }
-            </div>
-        `;
-    }
-
-    // =====================================================================
-    // Render: admin user-selector shown atop the page once a محفظ is chosen,
-    // so the admin can switch to a different one without a full reload.
-    // =====================================================================
-    function renderUserSelector() {
-        if (!isAdminMode() || allUsers.length === 0) return '';
-        return `
-            <section class="bg-primary rounded-2xl p-4 shadow-sm mb-4 fade-in">
-                <div class="flex items-center gap-2 mb-3">
-                    <span class="material-symbols-outlined text-secondary" aria-hidden="true">admin_panel_settings</span>
-                    <h4 class="text-white font-bold text-sm">لوحة الإدارة</h4>
-                </div>
-                ${mentorChips()}
-            </section>
-        `;
-    }
-
-    // =====================================================================
-    // Render: initial mentor-selection screen (admin only, before any
-    // محفظ has been picked). Mirrors attendance.js's renderSelectMentor.
-    // =====================================================================
-    function renderSelectMentor() {
-        mainContent.innerHTML = `
-            <section class="bg-primary rounded-2xl p-4 shadow-sm mb-4 fade-in">
-                <div class="flex items-center gap-2 mb-3">
-                    <span class="material-symbols-outlined text-secondary" aria-hidden="true">admin_panel_settings</span>
-                    <h4 class="text-white font-bold text-sm">لوحة الإدارة</h4>
-                </div>
-                ${mentorChips()}
-            </section>
-            <section class="flex-1 flex items-center justify-center fade-in py-10">
-                <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
-                    <div class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-secondary/10 mb-4">
-                        <span class="material-symbols-outlined text-secondary text-5xl" aria-hidden="true">manage_accounts</span>
-                    </div>
-                    <h3 class="text-headline-md text-primary font-bold mb-2">اختر محفظاً</h3>
-                    <p class="text-body-md text-on-surface-variant">اختر محفظاً من الشريط أعلاه لعرض تقييمات طلبته</p>
-                </div>
-            </section>
-        `;
-        document.getElementById('adminUsersList')?.addEventListener('click', (e) => {
-            const chip = e.target.closest('.admin-user-chip');
-            if (!chip) return;
-            switchViewingUser(chip.dataset.id);
-        });
     }
 
     // =====================================================================
     // Render: main page
     // =====================================================================
     function renderPage() {
-        const top5 = topStudents(5);
-        const visible = visibleStudents();
+        const listEl          = document.getElementById('studentsList');
+        const savedScrollTop  = listEl ? listEl.scrollTop : 0;
+        const searchHadFocus  = document.activeElement && document.activeElement.id === 'studentSearch';
+        const caretPos        = searchHadFocus ? document.activeElement.selectionStart : null;
+
+        const stats    = computeStats();
+        const top5     = getTopStudents(5);
+        const visible  = getVisibleStudents();
+        const allSubjects = [...collectSubjectsFromStudents(students)].sort((a, b) => a.localeCompare(b, 'ar'));
 
         mainContent.innerHTML = `
             <section class="mb-5 fade-in">
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <h2 class="text-headline-lg text-primary font-bold flex items-center gap-2">
-                            <span class="material-symbols-outlined text-secondary" aria-hidden="true">grading</span>
-                            التقييمات
+                            <span class="material-symbols-outlined text-secondary">grading</span>التقييمات
                         </h2>
-                        <p class="text-body-md text-on-surface-variant mt-1">أضف المواد ثم اضغط على أي طالب لتسجيل درجاته</p>
+                        <p class="text-body-md text-on-surface-variant mt-1">تابع درجات الطلبة وأضف تقييمات جديدة</p>
                     </div>
-                    <button onclick="location.href='dashboard.html'" class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center shadow-sm hover:bg-surface-container-low transition-colors" aria-label="إغلاق">
-                        <span class="material-symbols-outlined text-on-surface-variant" aria-hidden="true">close</span>
-                    </button>
                 </div>
             </section>
 
-            ${renderUserSelector()}
-
-            <!-- Subjects manager -->
-            <section class="bg-surface-container rounded-2xl p-5 shadow-sm mb-4 fade-in" style="animation-delay: 0.05s">
-                <label class="text-label-bold text-on-surface-variant mb-2 block" for="subjectInput">إضافة مادة</label>
-                <form id="subjectForm" class="flex gap-2">
-                    <input type="text" id="subjectInput" class="subject-input" placeholder="مثال: حفظ، تجويد، حديث" autocomplete="off" maxlength="40"/>
-                    <button type="submit" class="bg-secondary text-white px-4 rounded-xl font-bold shadow-sm active:scale-95 transition-transform flex items-center justify-center flex-shrink-0" aria-label="إضافة المادة">
-                        <span class="material-symbols-outlined" aria-hidden="true">add</span>
-                    </button>
-                </form>
-                <div class="flex flex-wrap gap-2 mt-3">
-                    ${subjects.length === 0
-                        ? `<p class="text-xs text-on-surface-variant">لم تُضف أي مادة بعد</p>`
-                        : subjects.map((s) => `
-                            <span class="subject-chip">
-                                ${escapeHtml(s)}
-                                <button data-remove-subject="${escapeHtml(s)}" type="button" aria-label="إزالة مادة ${escapeHtml(s)}">
-                                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
-                                </button>
-                            </span>
-                        `).join('')
-                    }
+            <section class="grid grid-cols-3 gap-3 mb-5 fade-in" style="animation-delay:.05s">
+                <div class="bg-surface-container rounded-2xl p-4 shadow-sm text-center">
+                    <div class="text-xl font-bold text-primary">${stats.totalStudents}</div>
+                    <div class="text-[11px] text-on-surface-variant font-bold mt-1">طالب</div>
+                </div>
+                <div class="bg-surface-container rounded-2xl p-4 shadow-sm text-center">
+                    <div class="text-xl font-bold text-secondary">${formatDegree(stats.avg)}</div>
+                    <div class="text-[11px] text-on-surface-variant font-bold mt-1">متوسط المجموع</div>
+                </div>
+                <div class="bg-surface-container rounded-2xl p-4 shadow-sm text-center">
+                    <div class="text-xl font-bold text-gold">${formatDegree(stats.max)}</div>
+                    <div class="text-[11px] text-on-surface-variant font-bold mt-1">أعلى مجموع</div>
                 </div>
             </section>
 
-            <!-- Top 5 leaderboard -->
-            <section class="bg-surface-container rounded-2xl p-5 shadow-sm mb-4 fade-in" style="animation-delay: 0.1s">
-                <h4 class="text-label-bold text-on-surface-variant font-bold flex items-center gap-1 mb-3">
-                    <span class="material-symbols-outlined text-base text-secondary" aria-hidden="true">emoji_events</span>
-                    أفضل 5 طلاب
-                </h4>
-                ${isGridLoading ? renderLeaderboardSkeleton() : (top5.length === 0 ? `
-                    <p class="text-xs text-on-surface-variant text-center py-4">لا توجد درجات مسجَّلة بعد</p>
-                ` : `
-                    <div class="space-y-1" id="leaderboardList">
-                        ${top5.map((r, i) => `
-                            <div class="flex items-center gap-3 py-1.5 leaderboard-row" data-student-id="${String(r.student._id || r.student.id)}" role="button" tabindex="0">
-                                <div class="rank-badge ${i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : 'rank-other'}">
-                                    ${i < 3 ? `<span class="material-symbols-outlined" style="font-size:16px" aria-hidden="true">${i === 0 ? 'trophy' : 'military_tech'}</span>` : i + 1}
-                                </div>
-                                <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-bold text-primary truncate">${escapeHtml(r.student.name)}</p>
-                                </div>
-                                <span class="text-sm font-bold text-secondary flex-shrink-0">${formatDegree(r.total)}</span>
-                            </div>
-                        `).join('')}
+            ${renderLeaderboard(top5)}
+
+            <section class="bg-surface-container rounded-2xl shadow-sm mb-4 overflow-hidden fade-in" style="animation-delay:.25s">
+                <div class="p-4 border-b border-outline-variant">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-headline-md text-primary font-bold flex items-center gap-2">
+                            <span class="material-symbols-outlined text-secondary">group</span>كل الطلبة
+                        </h4>
+                        <span class="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full font-bold">${visible.length}${visible.length !== students.length ? ` من ${students.length}` : ''}</span>
                     </div>
-                `)}
-            </section>
-
-            <!-- Students grid -->
-            <section class="mb-4 fade-in" style="animation-delay: 0.15s">
-                <div class="flex items-center justify-between mb-3">
-                    <h4 class="text-headline-md text-primary font-bold flex items-center gap-2">
-                        <span class="material-symbols-outlined text-secondary" aria-hidden="true">group</span>
-                        الطلبة
-                    </h4>
-                    <span class="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full font-bold">${students.length}</span>
-                </div>
-
-                ${students.length > 0 ? `
-                <div class="flex gap-2 mb-3">
-                    <div class="search-input-wrap">
-                        <input type="search" id="studentSearch" class="search-input" placeholder="ابحث عن طالب..." value="${escapeHtml(searchQuery)}" aria-label="ابحث عن طالب"/>
-                        <span class="material-symbols-outlined" aria-hidden="true">search</span>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <div class="relative flex-1">
+                            <span class="material-symbols-outlined absolute top-1/2 -translate-y-1/2 right-3 text-on-surface-variant text-lg pointer-events-none">search</span>
+                            <input type="text" id="studentSearch" aria-label="ابحث عن طالب بالاسم"
+                                class="w-full bg-surface rounded-xl border border-outline-variant py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50"
+                                placeholder="ابحث عن طالب بالاسم..." value="${escapeHtml(searchQuery)}" autocomplete="off"/>
+                            ${searchQuery ? `<button id="clearSearch" aria-label="مسح البحث"
+                                class="absolute top-1/2 -translate-y-1/2 left-2 w-6 h-6 flex items-center justify-center rounded-full hover:bg-surface-container-highest">
+                                <span class="material-symbols-outlined text-base text-on-surface-variant">close</span>
+                            </button>` : ''}
+                        </div>
+                        ${allSubjects.length ? `
+                        <select id="subjectFilterSelect" aria-label="تصفية حسب المادة"
+                            class="bg-surface rounded-xl border border-outline-variant py-2.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50 sm:w-40">
+                            <option value="">كل المواد</option>
+                            ${allSubjects.map(name => `<option value="${escapeHtml(name)}" ${subjectFilter === name ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}
+                        </select>` : ''}
                     </div>
-                    <select id="sortSelect" class="sort-select" aria-label="ترتيب حسب">
-                        <option value="name" ${sortMode === 'name' ? 'selected' : ''}>الاسم</option>
-                        <option value="avg_desc" ${sortMode === 'avg_desc' ? 'selected' : ''}>الأعلى معدلاً</option>
-                        <option value="avg_asc" ${sortMode === 'avg_asc' ? 'selected' : ''}>الأقل معدلاً</option>
-                        <option value="unrated" ${sortMode === 'unrated' ? 'selected' : ''}>بلا درجات</option>
-                    </select>
                 </div>
-                ` : ''}
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="studentsGrid" aria-live="polite">
-                    ${isGridLoading ? renderGridSkeleton() : renderStudentCards(visible)}
+                <div class="divide-y divide-outline-variant max-h-[65vh] overflow-y-auto" id="studentsList">
+                    ${visible.length ? renderStudentRows(visible) : renderNoSearchResults()}
                 </div>
             </section>
         `;
 
         attachPageEvents();
-    }
 
-    function renderGridSkeleton() {
-        return Array.from({ length: 4 }).map((_, i) => `
-            <div class="skeleton-card" style="animation-delay:${i * 40}ms">
-                <div class="skeleton skeleton-avatar"></div>
-                <div class="flex-1">
-                    <div class="skeleton skeleton-line" style="width:60%"></div>
-                    <div class="skeleton skeleton-line" style="width:40%;margin-bottom:0"></div>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    function renderLeaderboardSkeleton() {
-        return `<div class="space-y-2">${Array.from({ length: 3 }).map(() => `
-            <div class="flex items-center gap-3 py-1">
-                <div class="skeleton" style="width:30px;height:30px;border-radius:50%"></div>
-                <div class="skeleton skeleton-line" style="flex:1;margin-bottom:0"></div>
-            </div>
-        `).join('')}</div>`;
-    }
-
-    function renderStudentCards(list) {
-        const items = list || students;
-
-        if (items.length === 0) {
-            return `
-                <div class="col-span-full text-center py-10 text-on-surface-variant">
-                    <span class="material-symbols-outlined text-4xl opacity-40" aria-hidden="true">search_off</span>
-                    <p class="text-body-md mt-2">لا يوجد طالب يطابق البحث</p>
-                </div>
-            `;
+        if (savedScrollTop > 0) {
+            requestAnimationFrame(() => {
+                const newListEl = document.getElementById('studentsList');
+                if (newListEl) newListEl.scrollTop = savedScrollTop;
+            });
         }
+        if (searchHadFocus) {
+            const input = document.getElementById('studentSearch');
+            if (input) { input.focus(); if (caretPos !== null) input.setSelectionRange(caretPos, caretPos); }
+        }
+    }
 
-        return items.map((s, idx) => {
-            const id = String(s._id || s.id);
-            const avg = studentAverage(id);
-            const total = studentTotal(id); // <-- server totalDegree, from GET /tests
-            const colors = ringColor(avg);
-            const subjectsMarked = Object.keys(studentSubjectDegrees(id)).length;
+    // =====================================================================
+    // Render: leaderboard (signature element — medal-ranked top 5)
+    // =====================================================================
+    const RANK_STYLES = [
+        { badge: 'bg-gold text-white',   ring: 'ring-2 ring-gold',   icon: 'workspace_premium', label: 'الأول'  },
+        { badge: 'bg-silver text-white', ring: 'ring-2 ring-silver', icon: 'military_tech',      label: 'الثاني' },
+        { badge: 'bg-bronze text-white', ring: 'ring-2 ring-bronze', icon: 'military_tech',      label: 'الثالث' },
+        { badge: 'bg-primary/10 text-primary', ring: '', icon: '', label: 'الرابع'  },
+        { badge: 'bg-primary/10 text-primary', ring: '', icon: '', label: 'الخامس' },
+    ];
 
-            let subtitle;
-            if (subjectsMarked > 0) {
-                subtitle = `${subjectsMarked} مادة مسجَّلة (هذا الجهاز) · المجموع ${formatDegree(total)}`;
-            } else if (total > 0) {
-                subtitle = `المجموع ${formatDegree(total)}`;
-            } else {
-                subtitle = 'لا توجد درجات بعد';
-            }
-
-            return `
-                <div class="student-card flex items-center gap-3" data-student-id="${id}" role="button" tabindex="0"
-                     aria-label="فتح درجات ${escapeHtml(s.name)}"
-                     style="animation: fadeIn 0.3s ease both; animation-delay: ${idx * 20}ms">
-                    <div class="avg-ring" style="background:${colors.bg}; color:${colors.fg}" aria-hidden="true">
-                        ${avg === null ? '—' : formatDegree(avg)}
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-body-md font-bold text-primary truncate">${escapeHtml(s.name)}</p>
-                        <p class="text-xs text-on-surface-variant mt-0.5">${subtitle}</p>
-                        ${avg !== null ? `
-                        <div class="progress-track">
-                            <div class="progress-fill" style="width:${Math.min(avg, 100)}%; background:${colors.fg}"></div>
-                        </div>` : ''}
-                    </div>
-                    <span class="material-symbols-outlined text-on-surface-variant/50 rtl:-scale-x-100" aria-hidden="true">chevron_left</span>
+    function renderLeaderboard(top5) {
+        if (!top5.length) return '';
+        return `
+            <section class="mb-5 fade-in" style="animation-delay:.15s">
+                <h4 class="text-label-bold text-on-surface-variant font-bold flex items-center gap-1 mb-3">
+                    <span class="material-symbols-outlined text-base text-gold">emoji_events</span>الأوائل
+                </h4>
+                <div class="flex gap-3 overflow-x-auto pb-1">
+                    ${top5.map((s, i) => {
+                        const style = RANK_STYLES[i] || RANK_STYLES[4];
+                        return `
+                        <button type="button" data-open-student="${escapeHtml(getStudentId(s))}"
+                            class="leaderboard-card flex-shrink-0 w-36 bg-surface-container rounded-2xl p-3 shadow-sm text-center ${style.ring} transition-transform active:scale-95">
+                            <div class="w-10 h-10 mx-auto rounded-full flex items-center justify-center font-bold text-sm mb-2 ${style.badge}">
+                                ${style.icon ? `<span class="material-symbols-outlined text-lg">${style.icon}</span>` : `#${i + 1}`}
+                            </div>
+                            <div class="text-body-md font-bold text-primary truncate">${escapeHtml(s.name)}</div>
+                            <div class="text-lg font-bold text-secondary mt-1">${formatDegree(s.totalDegree)}</div>
+                            <div class="text-[10px] text-on-surface-variant font-bold">${style.label}</div>
+                        </button>`;
+                    }).join('')}
                 </div>
-            `;
+            </section>`;
+    }
+
+    // =====================================================================
+    // Render: student rows
+    // =====================================================================
+    function renderStudentRows(list) {
+        const maxes = computeSubjectMaxes(students);
+        return list.map((s, idx) => {
+            const id = getStudentId(s);
+            const subjects = s.subjects || [];
+            return `
+                <div class="p-4 hover:bg-surface transition-colors cursor-pointer" data-open-student="${escapeHtml(id)}"
+                    tabindex="0" role="button" aria-label="فتح تقييمات ${escapeHtml(s.name)}"
+                    style="animation:fadeIn 0.3s ease both;animation-delay:${Math.min(idx, 20) * 20}ms">
+                    <div class="flex items-center gap-3">
+                        <div class="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <span class="text-primary font-bold text-sm">${escapeHtml(getInitials(s.name))}</span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-body-md font-bold text-primary truncate">${escapeHtml(s.name)}</div>
+                            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                ${subjects.length
+                                    ? subjects.map(sub => `
+                                        <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${gradeColorClasses(Number(sub.degree) || 0, maxes[sub.name] || 0)}">
+                                            ${escapeHtml(sub.name)} · ${formatDegree(sub.degree)}
+                                        </span>`).join('')
+                                    : `<span class="text-[11px] text-on-surface-variant/60">لا توجد مواد بعد</span>`}
+                            </div>
+                        </div>
+                        <div class="text-left flex-shrink-0">
+                            <div class="text-lg font-bold text-secondary">${formatDegree(s.totalDegree)}</div>
+                            <div class="text-[10px] text-on-surface-variant font-bold">المجموع</div>
+                        </div>
+                        <span class="material-symbols-outlined text-on-surface-variant/50 rtl:-scale-x-100">chevron_left</span>
+                    </div>
+                </div>`;
         }).join('');
     }
 
+    function renderNoSearchResults() {
+        return `
+            <div class="p-10 text-center">
+                <span class="material-symbols-outlined text-4xl text-on-surface-variant/40 mb-2 block">search_off</span>
+                <p class="text-sm text-on-surface-variant">لا يوجد طالب مطابق للبحث</p>
+                ${(searchQuery || subjectFilter) ? `<button id="resetFilters" class="mt-3 text-sm font-bold text-secondary underline">إعادة ضبط الفلاتر</button>` : ''}
+            </div>`;
+    }
+
     // =====================================================================
-    // Events — page level
+    // Page-level event wiring
     // =====================================================================
     function attachPageEvents() {
-        const subjectForm = document.getElementById('subjectForm');
-        subjectForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const input = document.getElementById('subjectInput');
-            addSubject(input.value);
-            input.value = '';
-            input.focus();
-        });
-
-        document.querySelectorAll('[data-remove-subject]').forEach((btn) => {
-            btn.addEventListener('click', () => removeSubject(btn.dataset.removeSubject));
-        });
-
-        // Student cards — click + keyboard (Enter / Space) activation
-        document.querySelectorAll('.student-card').forEach((card) => {
-            card.addEventListener('click', () => openDegreeModal(card.dataset.studentId));
-            card.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openDegreeModal(card.dataset.studentId);
-                }
-            });
-        });
-
-        // Leaderboard rows are shortcuts into the same modal
-        document.querySelectorAll('.leaderboard-row').forEach((row) => {
-            row.addEventListener('click', () => openDegreeModal(row.dataset.studentId));
-            row.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openDegreeModal(row.dataset.studentId);
-                }
-            });
-        });
-
-        // Search box — live filter, debounced lightly via input event
         const searchInput = document.getElementById('studentSearch');
-        if (searchInput) {
-            searchInput.addEventListener('input', () => {
-                searchQuery = searchInput.value;
-                const grid = document.getElementById('studentsGrid');
-                grid.innerHTML = renderStudentCards(visibleStudents());
-                document.querySelectorAll('.student-card').forEach((card) => {
-                    card.addEventListener('click', () => openDegreeModal(card.dataset.studentId));
-                    card.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            openDegreeModal(card.dataset.studentId);
-                        }
-                    });
-                });
-            });
-        }
+        searchInput?.addEventListener('input', e => {
+            const val = e.target.value;
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => { searchQuery = val; renderPage(); }, 150);
+        });
+        document.getElementById('clearSearch')?.addEventListener('click', () => { searchQuery = ''; renderPage(); });
+        document.getElementById('resetFilters')?.addEventListener('click', () => { searchQuery = ''; subjectFilter = ''; renderPage(); });
 
-        // Sort dropdown
-        const sortSelect = document.getElementById('sortSelect');
-        if (sortSelect) {
-            sortSelect.addEventListener('change', () => {
-                sortMode = sortSelect.value;
-                renderPage();
-            });
-        }
+        document.getElementById('subjectFilterSelect')?.addEventListener('change', e => {
+            subjectFilter = e.target.value;
+            renderPage();
+        });
 
-        // Admin user selector (chips)
-        document.getElementById('adminUsersList')?.addEventListener('click', (e) => {
-            const chip = e.target.closest('.admin-user-chip');
-            if (!chip) return;
-            switchViewingUser(chip.dataset.id);
+        document.querySelectorAll('[data-open-student]').forEach(el => {
+            const openFn = () => {
+                const id = el.dataset.openStudent;
+                const student = students.find(s => getStudentId(s) === id);
+                if (student) openDegreeModal(student, el);
+            };
+            el.addEventListener('click', openFn);
+            el.addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFn(); }
+            });
         });
     }
 
     // =====================================================================
-    // Degree entry modal
+    // Degree modal
     // =====================================================================
-    function updateDegreeRowStyle(input) {
-        const row = input.closest('.degree-input-row');
-        input.classList.remove('deg-low', 'deg-mid', 'deg-high');
-        const cls = degreeInputClass(input.value);
-        if (cls) input.classList.add(cls);
-        if (row) row.classList.toggle('has-value', input.value !== '');
-    }
+    function openDegreeModal(student, triggerEl) {
+        activeStudent = student;
+        modalSubjects = (student.subjects || []).map((sub, i) => ({
+            id: `existing-${i}`,
+            name: sub.name,
+            degree: Number(sub.degree) || 0,
+            isNew: false,
+        }));
+        modalSnapshot = JSON.stringify(modalSubjects);
+        lastFocusedEl = triggerEl || document.activeElement;
 
-    function openDegreeModal(studentId) {
-        const student = students.find((s) => String(s._id || s.id) === studentId);
-        if (!student) return;
-
-        lastFocusedElement = document.activeElement;
-        activeStudentId = studentId;
-        modalInitials.textContent = getInitials(student.name);
-        modalStudentName.textContent = student.name;
-        modalStudentMeta.textContent = student.age ? `${student.age} سنة` : '';
-
-        const current = studentSubjectDegrees(studentId);
-
-        if (subjects.length === 0) {
-            modalSubjectsList.innerHTML = '';
-            modalNoSubjects.classList.remove('hidden');
-            saveDegreesBtn.disabled = true;
-        } else {
-            modalNoSubjects.classList.add('hidden');
-            saveDegreesBtn.disabled = false;
-            modalSubjectsList.innerHTML = subjects.map((subj, i) => {
-                const existing = current[subj] !== undefined ? current[subj] : '';
-                const cls = degreeInputClass(existing);
-                return `
-                    <div class="degree-input-row ${existing !== '' ? 'has-value' : ''}">
-                        <label class="text-sm font-bold text-primary flex-1" for="degree-${escapeHtml(subj)}">${escapeHtml(subj)}</label>
-                        <input type="number" inputmode="numeric" min="0" max="100" class="degree-input ${cls}"
-                               id="degree-${escapeHtml(subj)}" data-subject="${escapeHtml(subj)}" data-index="${i}"
-                               value="${existing}" placeholder="—"/>
-                    </div>
-                `;
-            }).join('');
-
-            // Live color feedback + clamping + Enter-to-next-field
-            const inputs = Array.from(modalSubjectsList.querySelectorAll('.degree-input'));
-            inputs.forEach((input, i) => {
-                input.addEventListener('input', () => updateDegreeRowStyle(input));
-                input.addEventListener('blur', () => {
-                    if (input.value === '') return;
-                    let n = Number(input.value);
-                    if (isNaN(n)) { input.value = ''; }
-                    else {
-                        n = Math.max(0, Math.min(100, Math.round(n)));
-                        input.value = n;
-                    }
-                    updateDegreeRowStyle(input);
-                });
-                input.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const next = inputs[i + 1];
-                        if (next) next.focus(); else saveDegreesBtn.click();
-                    }
-                });
-            });
-        }
-
-        saveDegreesBtnText.textContent = 'حفظ الدرجات';
+        renderModal();
         degreeModal.classList.remove('hidden');
         degreeModal.classList.add('flex');
+        degreeModal.setAttribute('role', 'dialog');
+        degreeModal.setAttribute('aria-modal', 'true');
+        degreeModal.setAttribute('aria-label', `تقييمات ${student.name}`);
 
-        const firstInput = modalSubjectsList.querySelector('.degree-input');
-        (firstInput || closeModalBtn).focus();
+        // Move focus into the dialog for keyboard/screen-reader users.
+        requestAnimationFrame(() => {
+            const firstField = degreeModal.querySelector('input, button, select');
+            firstField?.focus();
+        });
+    }
+
+    function hasUnsavedChanges() {
+        return JSON.stringify(modalSubjects) !== modalSnapshot;
+    }
+
+    function requestCloseModal() {
+        if (hasUnsavedChanges()) {
+            const confirmed = window.confirm('توجد تغييرات لم يتم حفظها. هل تريد إغلاق النافذة دون حفظ؟');
+            if (!confirmed) return;
+        }
+        closeDegreeModal();
     }
 
     function closeDegreeModal() {
         degreeModal.classList.add('hidden');
         degreeModal.classList.remove('flex');
-        activeStudentId = null;
-        if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
-            lastFocusedElement.focus();
-        }
+        activeStudent = null;
+        modalSubjects = [];
+        modalSnapshot = '';
+        lastFocusedEl?.focus?.();
+        lastFocusedEl = null;
     }
 
-    closeModalBtn.addEventListener('click', closeDegreeModal);
-    degreeModal.addEventListener('click', (e) => { if (e.target === degreeModal) closeDegreeModal(); });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !degreeModal.classList.contains('hidden')) closeDegreeModal();
-    });
+    function renderModal() {
+        if (!activeStudent) return;
 
-    // Basic focus trap while the modal is open
-    degreeModal.addEventListener('keydown', (e) => {
-        if (e.key !== 'Tab') return;
-        const focusable = degreeModal.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
-        if (focusable.length === 0) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-            e.preventDefault(); last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault(); first.focus();
+        modalInitials.textContent    = getInitials(activeStudent.name);
+        modalStudentName.textContent = activeStudent.name;
+        const total = modalSubjects.reduce((sum, s) => sum + (Number(s.degree) || 0), 0);
+        modalStudentMeta.textContent = `${modalSubjects.length} مادة · المجموع الحالي ${formatDegree(total)}`;
+
+        modalNoSubjects.classList.toggle('hidden', modalSubjects.length > 0);
+
+        const hasExistingRows = modalSubjects.some(s => !s.isNew);
+
+        const rowsHtml = modalSubjects.map(sub => `
+            <div class="flex items-center gap-2 bg-surface rounded-xl p-3" data-subject-row="${sub.id}">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-sm font-bold text-primary truncate">${escapeHtml(sub.name)}</span>
+                        ${sub.isNew ? `<span class="text-[10px] font-extrabold text-on-secondary-container bg-secondary-container px-1.5 py-0.5 rounded-full flex-shrink-0">جديد</span>` : ''}
+                    </div>
+                </div>
+                <input type="number" step="0.01" min="0" inputmode="decimal"
+                    aria-label="درجة ${escapeHtml(sub.name)}"
+                    class="w-20 text-center bg-white border border-outline-variant rounded-lg py-1.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-secondary/50"
+                    data-degree-input="${sub.id}" value="${sub.degree}"/>
+                ${sub.isNew ? `
+                <button type="button" data-remove-subject="${sub.id}" aria-label="حذف ${escapeHtml(sub.name)}"
+                    class="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg text-error hover:bg-error-container transition-colors">
+                    <span class="material-symbols-outlined text-lg">delete</span>
+                </button>` : ''}
+            </div>`).join('');
+
+        const addRowHtml = `
+            <div class="border border-dashed border-outline-variant rounded-xl p-3">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="material-symbols-outlined text-secondary text-lg">add_circle</span>
+                    <span class="text-xs font-bold text-on-surface-variant">إضافة مادة</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="newSubjectName" list="subjectSuggestionsList" placeholder="اسم المادة" aria-label="اسم المادة الجديدة"
+                        class="flex-1 min-w-0 bg-white border border-outline-variant rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50" autocomplete="off"/>
+                    <input type="number" id="newSubjectDegree" step="0.01" min="0" inputmode="decimal" placeholder="الدرجة" aria-label="درجة المادة الجديدة"
+                        class="w-20 text-center bg-white border border-outline-variant rounded-lg py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-secondary/50"/>
+                    <button id="addSubjectBtn" type="button" aria-label="إضافة المادة"
+                        class="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-secondary text-white active:scale-95 transition-transform">
+                        <span class="material-symbols-outlined text-lg">add</span>
+                    </button>
+                </div>
+            </div>
+            ${hasExistingRows ? `<p class="text-[11px] text-on-surface-variant/70 text-center pt-1">لحذف مادة محفوظة سابقًا، تواصل مع الإدارة</p>` : ''}`;
+
+        modalSubjectsList.innerHTML = rowsHtml + addRowHtml;
+
+        modalSubjectsList.querySelectorAll('[data-degree-input]').forEach(input => {
+            input.addEventListener('input', () => {
+                const row = modalSubjects.find(s => s.id === input.dataset.degreeInput);
+                if (!row) return;
+                row.degree = Number(input.value) || 0;
+                modalStudentMeta.textContent = `${modalSubjects.length} مادة · المجموع الحالي ${formatDegree(modalSubjects.reduce((sum, s) => sum + (Number(s.degree) || 0), 0))}`;
+            });
+            input.addEventListener('blur', () => {
+                const val = Number(input.value);
+                if (val > CONFIG.DEGREE_SANITY_CEILING) {
+                    showToast(`تنبيه: الدرجة ${formatDegree(val)} تبدو كبيرة، تأكد من صحتها`, 'warning');
+                }
+            });
+        });
+
+        modalSubjectsList.querySelectorAll('[data-remove-subject]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.removeSubject;
+                modalSubjects = modalSubjects.filter(s => s.id !== id);
+                renderModal();
+            });
+        });
+
+        document.getElementById('addSubjectBtn').addEventListener('click', handleAddSubject);
+        document.getElementById('newSubjectName').addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); handleAddSubject(); }
+        });
+    }
+
+    function handleAddSubject() {
+        const nameInput   = document.getElementById('newSubjectName');
+        const degreeInput = document.getElementById('newSubjectDegree');
+        const name   = (nameInput.value || '').trim();
+        const degree = Number(degreeInput.value);
+
+        if (!name) { showToast('يرجى إدخال اسم المادة', 'error'); nameInput.focus(); return; }
+        if (Number.isNaN(degree) || degree < 0) { showToast('يرجى إدخال درجة صحيحة', 'error'); degreeInput.focus(); return; }
+        if (degree > CONFIG.DEGREE_SANITY_CEILING) {
+            showToast(`تنبيه: الدرجة ${formatDegree(degree)} تبدو كبيرة، تأكد من صحتها`, 'warning');
         }
-    });
 
-    saveDegreesBtn.addEventListener('click', async () => {
-        if (!activeStudentId || isSavingDegrees) return;
-
-        const inputs = Array.from(modalSubjectsList.querySelectorAll('.degree-input'));
-        const toSave = inputs
-            .map((el) => ({ subject: el.dataset.subject, degree: el.value }))
-            .filter((row) => row.degree !== '' && row.degree !== null);
-
-        if (toSave.length === 0) {
-            showToast('أدخل درجة مادة واحدة على الأقل', 'error');
-            return;
+        const existing = modalSubjects.find(s => s.name === name);
+        if (existing) {
+            existing.degree = degree;
+        } else {
+            modalSubjects.push({ id: `new-${Date.now()}`, name, degree, isNew: true });
         }
 
-        isSavingDegrees = true;
+        registerSubjectName(name);
+        renderModal();
+        // Keep focus in the add-row so a teacher can rapid-fire several subjects.
+        document.getElementById('newSubjectName')?.focus();
+        showToast(`✓ تمت إضافة "${name}"`, 'success');
+    }
+
+    async function handleSaveDegrees() {
+        if (!activeStudent) return;
+        if (modalSubjects.length === 0) { showToast('أضف مادة واحدة على الأقل قبل الحفظ', 'error'); return; }
+
+        const studentId = getStudentId(activeStudent);
+        const payload = modalSubjects.map(s => ({
+            student_id: studentId,
+            name: s.name,
+            degree: Number(s.degree) || 0,
+        }));
+
+        isSaving = true;
         saveDegreesBtn.disabled = true;
         saveDegreesBtnText.textContent = 'جارٍ الحفظ...';
 
-        // One batched request: [ { student_id, name, degree }, ... ]
-        // Saves go to the currently-viewed user (viewingUserId), which
-        // matters when an admin is entering degrees on someone else's behalf.
-        const payload = toSave.map((row) => ({
-            student_id: activeStudentId,
-            name: row.subject,
-            degree: Math.max(0, Math.min(100, Number(row.degree))),
-        }));
-
-        let saveFailed = false;
         try {
-            await saveEvaluations(payload);
-            // Cache what was just entered locally (for modal prefill / subject
-            // count on this device) — this is NOT the source of truth for totals.
-            cacheDegrees(activeStudentId, toSave.map((row) => ({
-                subject: row.subject,
-                degree: Math.max(0, Math.min(100, Number(row.degree))),
-            })));
-        } catch (err) {
-            saveFailed = true;
-        }
+            await postTests(payload);
 
-        if (!saveFailed) {
-            // Re-fetch so the total shown matches exactly what the server
-            // computed (we don't try to replicate its aggregation logic here).
-            try {
-                await loadDataForUser(viewingUserId);
-            } catch (err) {
-                // Non-fatal: the save itself succeeded, totals will just be
-                // stale until the next successful load.
+            // Optimistic local update: reflect the save immediately instead of
+            // showing a full-page skeleton again, then quietly reconcile with
+            // the server in the background.
+            const idx = students.findIndex(s => getStudentId(s) === studentId);
+            if (idx !== -1) {
+                students[idx] = {
+                    ...students[idx],
+                    subjects: modalSubjects.map(s => ({ name: s.name, degree: Number(s.degree) || 0 })),
+                    totalDegree: modalSubjects.reduce((sum, s) => sum + (Number(s.degree) || 0), 0),
+                };
             }
-        }
 
-        isSavingDegrees = false;
-        saveDegreesBtn.disabled = false;
-        saveDegreesBtnText.textContent = 'حفظ الدرجات';
-
-        if (!saveFailed) {
             showToast('✓ تم حفظ الدرجات بنجاح', 'success');
-        } else {
-            showToast('فشل حفظ الدرجات، حاول مرة أخرى', 'error');
-        }
+            closeDegreeModal();
+            headerSubtitle.textContent = `الطلبة: ${students.length}`;
+            renderPage();
 
-        closeDegreeModal();
-        renderPage();
+            // Background reconciliation — if the server computes totals
+            // differently (weights, rounding, etc.) this quietly corrects it.
+            const userId = getEffectiveUserId();
+            loadStudents(userId).then(renderPage).catch(() => { /* non-fatal, UI already reflects the save */ });
+        } catch (err) {
+            showToast(err.message || 'حدث خطأ أثناء الحفظ', 'error');
+        } finally {
+            isSaving = false;
+            saveDegreesBtn.disabled = false;
+            saveDegreesBtnText.textContent = 'حفظ الدرجات';
+        }
+    }
+
+    closeModalBtn.addEventListener('click', requestCloseModal);
+    saveDegreesBtn.addEventListener('click', handleSaveDegrees);
+    degreeModal.addEventListener('click', e => { if (e.target === degreeModal) requestCloseModal(); });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !degreeModal.classList.contains('hidden')) requestCloseModal();
+
+        // Minimal focus trap while the modal is open.
+        if (e.key === 'Tab' && !degreeModal.classList.contains('hidden')) {
+            const focusable = degreeModal.querySelectorAll('input, button, select, [tabindex]:not([tabindex="-1"])');
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last  = focusable[focusable.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
     });
 
     // =====================================================================
@@ -1033,11 +786,14 @@
     // =====================================================================
     function renderLoading() {
         mainContent.innerHTML = `
-            <section class="flex-1 flex flex-col items-center justify-center py-24 fade-in">
-                <div class="spinner mb-4" aria-hidden="true"></div>
-                <p class="text-body-md text-on-surface-variant">جارٍ تحميل البيانات...</p>
-            </section>
-        `;
+            <section class="space-y-3" aria-busy="true" aria-label="جارٍ التحميل">
+                <div class="skeleton-block h-8 w-2/3 rounded-lg"></div>
+                <div class="grid grid-cols-3 gap-3">
+                    ${'<div class="skeleton-block h-16 rounded-2xl"></div>'.repeat(3)}
+                </div>
+                <div class="skeleton-block h-24 rounded-2xl"></div>
+                ${'<div class="skeleton-block h-20 rounded-2xl"></div>'.repeat(4)}
+            </section>`;
     }
 
     function renderError(message) {
@@ -1045,17 +801,15 @@
             <section class="flex-1 flex items-center justify-center fade-in py-10">
                 <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
                     <div class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-error/10 mb-4">
-                        <span class="material-symbols-outlined text-error text-5xl" aria-hidden="true">cloud_off</span>
+                        <span class="material-symbols-outlined text-error text-5xl">cloud_off</span>
                     </div>
                     <h3 class="text-headline-md text-primary font-bold mb-2">تعذّر تحميل البيانات</h3>
                     <p class="text-body-md text-on-surface-variant mb-5">${escapeHtml(message)}</p>
                     <button id="retryBtn" class="bg-secondary text-white px-6 py-3 rounded-xl font-bold shadow-md active:scale-95 transition-transform inline-flex items-center gap-2">
-                        <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
-                        إعادة المحاولة
+                        <span class="material-symbols-outlined">refresh</span>إعادة المحاولة
                     </button>
                 </div>
-            </section>
-        `;
+            </section>`;
         document.getElementById('retryBtn').addEventListener('click', render);
     }
 
@@ -1064,40 +818,50 @@
             <section class="flex-1 flex items-center justify-center fade-in py-10">
                 <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
                     <div class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-secondary/10 mb-4">
-                        <span class="material-symbols-outlined text-secondary text-5xl" aria-hidden="true">group_off</span>
+                        <span class="material-symbols-outlined text-secondary text-5xl">group_off</span>
                     </div>
                     <h3 class="text-headline-md text-primary font-bold mb-2">لا يوجد طلبة</h3>
                     <p class="text-body-md text-on-surface-variant mb-5">يجب إضافة طلبة أولاً قبل تسجيل التقييمات</p>
-                    <div class="flex gap-3">
-                        <button onclick="location.href='dashboard.html'" class="flex-1 bg-surface text-on-surface py-3 rounded-xl font-bold border border-outline-variant active:scale-95 transition-transform">رجوع</button>
-                        <button onclick="location.href='students.html'" class="flex-1 bg-secondary text-white py-3 rounded-xl font-bold shadow-md active:scale-95 transition-transform flex items-center justify-center gap-2">
-                            <span class="material-symbols-outlined" aria-hidden="true">person_add</span>إضافة طالب
-                        </button>
-                    </div>
+                    <button onclick="location.href='students.html'" class="bg-secondary text-white px-6 py-3 rounded-xl font-bold shadow-md active:scale-95 transition-transform inline-flex items-center gap-2">
+                        <span class="material-symbols-outlined">person_add</span>إضافة طالب
+                    </button>
                 </div>
-            </section>
-        `;
+            </section>`;
+    }
+
+    function renderSelectMentor() {
+        mainContent.innerHTML = `
+            <section class="flex-1 flex items-center justify-center fade-in py-10">
+                <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
+                    <div class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-secondary/10 mb-4">
+                        <span class="material-symbols-outlined text-secondary text-5xl">manage_accounts</span>
+                    </div>
+                    <h3 class="text-headline-md text-primary font-bold mb-2">اختر محفظاً</h3>
+                    <p class="text-body-md text-on-surface-variant">اختر محفظاً من الشريط أعلاه لعرض تقييمات طلبته</p>
+                </div>
+            </section>`;
     }
 
     function renderNoUser() {
-        headerSubtitle.textContent = 'غير مسجل';
-        sideName.textContent = '—';
         mainContent.innerHTML = `
             <section class="flex-1 flex items-center justify-center fade-in py-10">
                 <div class="bg-surface-container rounded-2xl p-8 shadow-sm text-center max-w-md w-full">
                     <div class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-error/10 mb-4">
-                        <span class="material-symbols-outlined text-error text-5xl" aria-hidden="true">warning</span>
+                        <span class="material-symbols-outlined text-error text-5xl">warning</span>
                     </div>
                     <h3 class="text-headline-md text-primary font-bold mb-2">لا يوجد محفظ نشط</h3>
                     <p class="text-body-md text-on-surface-variant mb-5">يرجى تسجيل الدخول كمحفظ أولاً</p>
                     <button onclick="location.href='index.html'" class="bg-secondary text-white px-6 py-3 rounded-xl font-bold shadow-md active:scale-95 transition-transform inline-flex items-center gap-2">
-                        <span class="material-symbols-outlined" aria-hidden="true">login</span>تسجيل الدخول
+                        <span class="material-symbols-outlined">login</span>تسجيل الدخول
                     </button>
                 </div>
-            </section>
-        `;
+            </section>`;
     }
 
-    // Initial render
-    render();
+    // =====================================================================
+    // Boot
+    // =====================================================================
+    ensureSubjectDatalist();
+    refreshSubjectDatalist();
+    initAdminPanel().then(() => render());
 })();
