@@ -43,6 +43,7 @@ body {
     font-size: 14px; font-weight: 700; opacity: 0; pointer-events: none;
     transition: opacity 0.25s ease, transform 0.25s ease; z-index: 60; white-space: nowrap;
     box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis;
 }
 @media (min-width: 768px) { .toast { bottom: 24px; } }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -52,11 +53,14 @@ body {
 
 /* ----------------------------- NEW ----------------------------------- */
 
-/* Subject chips */
+/* Subject chips (kept for any page that still uses the pill-style picker;
+   the evaluations degree modal now uses row layout instead — see note in
+   the UX doc about this previously-orphaned styling). */
 .subject-chip {
     display: inline-flex; align-items: center; gap: 6px;
     background: #0B1D3A0d; color: #0B1D3A; font-weight: 700; font-size: 13px;
     padding: 7px 12px; border-radius: 999px; border: 1px solid #0B1D3A1a;
+    max-width: 100%;
 }
 .subject-chip button {
     display: flex; align-items: center; justify-content: center;
@@ -66,10 +70,20 @@ body {
 .subject-chip button:hover { opacity: 1; }
 .subject-chip button .material-symbols-outlined { font-size: 15px; }
 
+/* Draft subject: added locally, not yet backed by a saved degree */
+.subject-chip-draft {
+    background: #fdd26533; border-style: dashed; border-color: #C9A23A66;
+}
+.subject-chip-tag {
+    font-size: 10px; font-weight: 800; color: #755900;
+    background: #fdd265; padding: 1px 6px; border-radius: 999px;
+    white-space: nowrap;
+}
+
 .subject-input {
     width: 100%; border: 1.5px solid #e2e2e2; border-radius: 12px;
     padding: 12px 14px; font-family: 'Cairo', sans-serif; font-size: 14px;
-    background: #F5F6F8; transition: border-color 0.15s;
+    background: #F5F6F8; transition: border-color 0.15s; box-sizing: border-box;
 }
 .subject-input:focus { outline: none; border-color: #C9A23A; background: #fff; }
 
@@ -77,6 +91,7 @@ body {
 .student-card {
     background: #fff; border-radius: 18px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     border: 1px solid #e2e2e2; cursor: pointer; transition: transform 0.12s, box-shadow 0.12s;
+    width: 100%; box-sizing: border-box;
 }
 .student-card:active { transform: scale(0.98); }
 .student-card:hover { box-shadow: 0 4px 14px rgba(11,29,58,0.08); }
@@ -91,11 +106,12 @@ body {
 .degree-input-row {
     display: flex; align-items: center; justify-content: space-between;
     gap: 10px; background: #F5F6F8; border-radius: 14px; padding: 10px 12px;
+    flex-wrap: wrap;
 }
 .degree-input {
     width: 80px; text-align: center; border: 1.5px solid #e2e2e2; border-radius: 10px;
     padding: 8px 6px; font-family: 'Cairo', sans-serif; font-weight: 700; font-size: 15px;
-    background: #fff;
+    background: #fff; box-sizing: border-box;
 }
 .degree-input:focus { outline: none; border-color: #C9A23A; }
 
@@ -108,3 +124,56 @@ body {
 .rank-2 { background: linear-gradient(135deg, #9AA5B1, #C7CFD6); }
 .rank-3 { background: linear-gradient(135deg, #B5651D, #D68B4C); }
 .rank-other { background: #0B1D3A; }
+
+/* ------------------------ NEW: accessibility --------------------------- */
+
+/* Visible focus ring app-wide — don't rely on the browser default, which
+   Tailwind's reset sometimes mutes. */
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid #C9A23A;
+    outline-offset: 2px;
+}
+
+/* "Skip to content" link — invisible until keyboard-focused. */
+.sr-only-focusable {
+    position: absolute; left: -9999px; top: auto;
+    background: #0B1D3A; color: #fff; padding: 10px 16px; border-radius: 0 0 10px 0;
+    font-weight: 700; z-index: 1000;
+}
+.sr-only-focusable:focus {
+    left: 0; top: 0;
+}
+
+/* ------------------------- RESPONSIVE (NEW) --------------------------- */
+
+/* Small phones (<380px): tighten paddings so cards never force horizontal
+   scroll and long Arabic names still truncate gracefully. */
+@media (max-width: 380px) {
+    .student-card { padding: 12px; border-radius: 14px; }
+    .student-card .avg-ring { width: 38px; height: 38px; font-size: 11px; }
+    .rank-badge { width: 26px; height: 26px; font-size: 12px; }
+    .subject-chip { padding: 5px 9px; font-size: 12px; }
+    .degree-input { width: 64px; font-size: 14px; }
+}
+
+/* Tablets and up: a little more breathing room, cards stop stretching
+   full-width once the grid gives them a fixed column. */
+@media (min-width: 640px) {
+    .student-card { padding: 18px; }
+}
+
+/* On very narrow modals, let the degree row wrap the input under the
+   subject name instead of squeezing both onto one line. */
+@media (max-width: 340px) {
+    .degree-input-row { justify-content: flex-start; }
+    .degree-input-row > div:first-child { flex-basis: 100%; }
+}
+
+/* Respect reduced-motion preferences across all the animated pieces. */
+@media (prefers-reduced-motion: reduce) {
+    .fade-in, .modal-enter, .spinner, .student-card, .subject-chip button {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+    }
+}
