@@ -10,9 +10,10 @@
     // that override is absent.
     const CONFIG = {
         API_BASE_URL: 'https://masjid-nodejs-production.up.railway.app/api',
-        TESTS_ENDPOINT:       (userId) => `/tests/${userId}`,   // GET  — all test/degree records for a محفظ's students
-        STORE_TESTS_ENDPOINT: ()       => `/tests`,             // POST — array of { student_id, name, degree }
-        ADMIN_USERS_ENDPOINT: '/users/admin/getUsers',          // GET  — requires Authorization: Bearer <token>
+        STUDENTS_ENDPOINT:    (userId) => `/students/${userId}`, // GET  — full student roster for a محفظ
+        TESTS_ENDPOINT:       (userId) => `/tests/${userId}`,    // GET  — test/degree records that actually exist
+        STORE_TESTS_ENDPOINT: ()       => `/tests`,              // POST — array of { student_id, name, degree }
+        ADMIN_USERS_ENDPOINT: '/users/admin/getUsers',           // GET  — requires Authorization: Bearer <token>
         // Soft sanity check only — we don't know each subject's real scale
         // (out of 10? out of 100?), so we warn instead of blocking.
         DEGREE_SANITY_CEILING: 100,
@@ -55,7 +56,7 @@
     let adminUsers    = [];   // list of محفظين — admin mode only
     let viewingUserId = null; // محفظ currently selected by the admin
 
-    let students          = [];        // raw records from GET /tests/{userId}
+    let students          = [];        // merged roster + test/degree records (see loadStudents)
     let searchQuery        = '';
     let subjectFilter       = '';       // '' = all subjects
     let isLoadingStudents  = false;
@@ -102,6 +103,11 @@
             throw new Error((body && body.message) || `فشل الطلب (${res.status})`);
         }
         return body;
+    }
+
+    function fetchStudentsRoster(userId) {
+        return apiRequest(CONFIG.STUDENTS_ENDPOINT(userId), { method: 'GET' })
+            .then(body => body.data || []);
     }
 
     function fetchTests(userId) {
@@ -225,6 +231,33 @@
 
     function getStudentId(s) { return String(s.student_id || s._id || s.id); }
 
+    /**
+     * Combine the full student roster with whatever test/degree records
+     * exist. GET /tests/{userId} only returns students who already have at
+     * least one recorded degree, so on its own it silently hides anyone the
+     * محفظ hasn't evaluated yet. Every roster student gets a row here —
+     * students without tests just start at totalDegree 0 with no subjects.
+     */
+    function mergeStudentsWithTests(roster, testsData) {
+        const byId = new Map();
+        testsData.forEach(t => byId.set(getStudentId(t), t));
+
+        const merged = roster.map(stu => {
+            const id    = String(stu._id || stu.id);
+            const match = byId.get(id);
+            return match
+                ? { ...match, student_id: id, name: match.name || stu.name }
+                : { student_id: id, name: stu.name, totalDegree: 0, subjects: [] };
+        });
+
+        // Defensive: keep any test record whose student no longer appears in
+        // the roster (e.g. transferred out) so existing degrees aren't lost.
+        const rosterIds = new Set(roster.map(stu => String(stu._id || stu.id)));
+        const orphaned  = testsData.filter(t => !rosterIds.has(getStudentId(t)));
+
+        return [...merged, ...orphaned];
+    }
+
     /** Unique, sorted subject names currently held in `students`. */
     function collectSubjectsFromStudents(list) {
         const set = new Set();
@@ -311,7 +344,21 @@
     // Data loading
     // =====================================================================
     async function loadStudents(userId) {
-        students = await fetchTests(userId);
+        // The roster is the source of truth for "who is a student here" — it
+        // must succeed for the page to make sense, so its error propagates.
+        const roster = await fetchStudentsRoster(userId);
+
+        // Tests, on the other hand, legitimately don't exist yet for a محفظ
+        // who hasn't recorded any evaluations — that's not an error state,
+        // it just means everyone starts at zero.
+        let testsData = [];
+        try {
+            testsData = await fetchTests(userId);
+        } catch (_) {
+            testsData = [];
+        }
+
+        students = mergeStudentsWithTests(roster, testsData);
         collectSubjectsFromStudents(students).forEach(name => subjectSuggestions.add(name));
         refreshSubjectDatalist();
     }
@@ -348,6 +395,8 @@
 
         headerSubtitle.textContent = `الطلبة: ${students.length}`;
 
+        // Only the roster being genuinely empty gets the "no students" state.
+        // Students with zero test records still render normally below.
         if (students.length === 0) {
             renderNoStudents();
             return;
@@ -397,7 +446,7 @@
                 </div>
             </section>
 
-            ${renderLeaderboard(top5)}
+            ${renderLeaderboard(top5, stats.max)}
 
             <section class="bg-surface-container rounded-2xl shadow-sm mb-4 overflow-hidden fade-in" style="animation-delay:.25s">
                 <div class="p-4 border-b border-outline-variant">
@@ -457,8 +506,23 @@
         { badge: 'bg-primary/10 text-primary', ring: '', icon: '', label: 'الخامس' },
     ];
 
-    function renderLeaderboard(top5) {
+    function renderLeaderboard(top5, statsMax) {
         if (!top5.length) return '';
+
+        // Every roster student can land in the top 5 with a totalDegree of 0
+        // once tests are missing entirely — a "ranking" of all-zeros isn't
+        // useful, so point the teacher at the real next step instead.
+        if (!statsMax || statsMax <= 0) {
+            return `
+                <section class="mb-5 fade-in" style="animation-delay:.15s">
+                    <div class="bg-surface-container rounded-2xl p-6 text-center shadow-sm border border-dashed border-outline-variant">
+                        <span class="material-symbols-outlined text-3xl text-on-surface-variant/40 mb-1 block">emoji_events</span>
+                        <p class="text-sm text-on-surface-variant font-bold">لم يتم تسجيل أي تقييمات بعد</p>
+                        <p class="text-xs text-on-surface-variant/70 mt-1">اضغط على أي طالب من القائمة أدناه لإضافة أول تقييم له</p>
+                    </div>
+                </section>`;
+        }
+
         return `
             <section class="mb-5 fade-in" style="animation-delay:.15s">
                 <h4 class="text-label-bold text-on-surface-variant font-bold flex items-center gap-1 mb-3">
@@ -506,7 +570,7 @@
                                         <span class="text-[11px] font-bold px-2 py-0.5 rounded-full ${gradeColorClasses(Number(sub.degree) || 0, maxes[sub.name] || 0)}">
                                             ${escapeHtml(sub.name)} · ${formatDegree(sub.degree)}
                                         </span>`).join('')
-                                    : `<span class="text-[11px] text-on-surface-variant/60">لا توجد مواد بعد</span>`}
+                                    : `<span class="text-[11px] text-on-surface-variant/60 italic">لم يُقيَّم بعد — اضغط للإضافة</span>`}
                             </div>
                         </div>
                         <div class="text-left flex-shrink-0">
