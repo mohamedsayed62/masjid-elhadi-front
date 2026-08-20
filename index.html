@@ -1,158 +1,68 @@
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>التقييمات - مسجد الهدي النبوي</title>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"/>
-<link rel="stylesheet" href="assets/css/tests.css"/>
-<script>
-tailwind.config = {
-    darkMode: "class",
-    theme: {
-        extend: {
-            colors: {
-                "primary": "#0B1D3A",
-                "primary-container": "#0b1d3a",
-                "on-primary": "#ffffff",
-                "secondary": "#C9A23A",
-                "secondary-container": "#fdd265",
-                "on-secondary-container": "#755900",
-                "surface": "#F5F6F8",
-                "surface-container": "#FFFFFF",
-                "surface-container-low": "#f3f3f4",
-                "surface-container-highest": "#e2e2e2",
-                "on-surface": "#1a1c1c",
-                "on-surface-variant": "#44474d",
-                "outline-variant": "#e2e2e2",
-                "error": "#BA1A1A",
-                "error-container": "#ffdad6",
-                "success": "#1E7D45",
-                "success-container": "#d4f5dd",
-                "warning": "#E67E22",
-                "gold": "#C9A23A",
-                "silver": "#9AA5B1",
-                "bronze": "#B5651D",
-            },
-            fontFamily: { "body": ["Cairo", "sans-serif"] },
-            fontSize: {
-                "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }],
-                "body-lg": ["16px", { lineHeight: "24px", fontWeight: "400" }],
-                "headline-md": ["20px", { lineHeight: "28px", fontWeight: "700" }],
-                "headline-lg": ["24px", { lineHeight: "32px", fontWeight: "700" }],
-                "headline-xl": ["28px", { lineHeight: "36px", fontWeight: "800" }],
-                "label-bold": ["12px", { lineHeight: "16px", fontWeight: "700" }],
-            },
-        }
-    }
-}
-</script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>إدخال بيانات المحفظ - مسجد الهدي النبوي</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/style.css" />
 </head>
-<body class="text-on-surface antialiased min-h-screen islamic-pattern flex flex-col md:flex-row relative pb-20 md:pb-0">
+<body>
+<div class="mobile-container">
+  <main>
 
-<!-- Top App Bar (Mobile) -->
-<header class="md:hidden bg-surface-container flex justify-between items-center px-4 py-3 w-full sticky top-0 shadow-sm z-40">
-    <div class="flex items-center gap-3">
-        <button onclick="history.back()" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface transition-colors">
-            <span class="material-symbols-outlined text-primary rtl:-scale-x-100">arrow_back</span>
+    <!-- Loading state: shown briefly while we check if a user id exists and fetch their data -->
+    <div class="header fade-in" id="checkingState">
+      <div class="logo-wrap">
+        <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+      </div>
+      <p class="subtitle">جاري التحقق من بياناتك...</p>
+    </div>
+
+    <!-- Returning user state: shown when we found an id in localStorage and fetched the user successfully -->
+    <div class="header fade-in hidden" id="welcomeState">
+      <div class="logo-wrap">
+        <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+      </div>
+      <h1 id="welcomeName">مرحباً بك</h1>
+      <p class="subtitle">تم تسجيل دخولك مسبقاً</p>
+      <button type="button" class="btn-primary" id="continueBtn">
+        <span id="continueLabel">المتابعة إلى لوحة التحكم</span>
+      </button>
+      <button type="button" class="btn-secondary" id="logoutBtn">تسجيل الخروج</button>
+    </div>
+
+    <!-- First-time / logged-out state: the registration form -->
+    <div id="formState" class="hidden">
+      <div class="header fade-in">
+        <div class="logo-wrap">
+          <img src="assets/images/logo.jpg" alt="شعار مسجد الهادي النبوي" />
+        </div>
+        <h1>مرحباً بك</h1>
+        <p class="subtitle">يرجى إدخال بياناتك لبدء استخدام التطبيق</p>
+      </div>
+
+      <form id="walletForm" class="fade-in" novalidate>
+        <div class="field-group">
+          <label for="sessionName">اسم المحفظ</label>
+          <div class="input-shell" id="nameShell">
+            <input id="sessionName" type="text" placeholder="أدخل اسم المحفظ" autocomplete="off" />
+          </div>
+          <span class="error-text" id="nameError">يرجى إدخال اسم المحفظ</span>
+        </div>
+
+        <button type="submit" class="btn-primary" id="saveBtn">
+          <span class="spinner" id="btnSpinner"></span>
+          <span id="btnLabel">حفظ وبدء الاستخدام</span>
         </button>
-        <div>
-            <h1 class="text-headline-md font-bold text-primary leading-tight">التقييمات</h1>
-            <p class="text-xs text-on-surface-variant leading-tight" id="headerSubtitle">—</p>
-        </div>
+      </form>
     </div>
-</header>
 
-<!-- SideNav Desktop -->
-<nav class="hidden md:flex flex-col bg-surface-container shadow-xl h-screen w-72 rounded-r-xl py-4 z-50 sticky top-0">
-    <div class="px-6 mb-8 flex items-center gap-4">
-        <div class="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center border-2 border-secondary">
-            <span class="material-symbols-outlined text-primary text-3xl">person</span>
-        </div>
-        <div>
-            <h2 class="text-headline-md font-bold text-primary" id="sideName">—</h2>
-            <p class="text-body-md text-on-surface-variant">محفظ</p>
-            <p class="text-label-bold text-secondary mt-1">مسجد الهدي النبوي</p>
-        </div>
-    </div>
-    <div class="flex-1 overflow-y-auto px-2 space-y-2">
-        <a class="menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="attendance.html">
-            <span class="material-symbols-outlined">how_to_reg</span>الحضور
-        </a>
-        <a class="menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="students.html">
-            <span class="material-symbols-outlined">group</span>الطلبة
-        </a>
-        <a class="flex items-center gap-3 bg-secondary-container text-on-secondary-container rounded-lg mx-2 px-4 py-3 font-bold" href="tests.html">
-            <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">grading</span>التقييمات
-        </a>
-        <a class="reports-btn menu-item flex items-center gap-3 text-on-surface-variant mx-2 px-4 py-3 rounded-lg" href="reports.html">
-            <span class="material-symbols-outlined">assessment</span>التقارير
-        </a>
-    </div>
-</nav>
-
-<!-- Main Content (rendered by evaluations.js) -->
-<main class="flex-1 flex flex-col w-full max-w-4xl mx-auto px-4 md:px-8 py-6 min-h-screen" id="mainContent"></main>
-
-<div id="degreeModal" class="fixed inset-0 z-[60] hidden items-end md:items-center justify-center modal-backdrop p-0 md:p-4">
-    <div class="bg-white rounded-t-3xl md:rounded-3xl w-full max-w-md shadow-2xl modal-enter flex flex-col max-h-[85vh]">
-
-        <!-- الجزء القابل للتمرير -->
-        <div class="p-6 pb-3 overflow-y-auto flex-1 min-h-0">
-            <div class="flex items-center gap-3 mb-5">
-                <div id="modalAvatar" class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <span class="text-primary font-bold text-sm" id="modalInitials">—</span>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <h3 id="modalStudentName" class="text-headline-md font-bold text-primary truncate">—</h3>
-                    <p class="text-xs text-on-surface-variant" id="modalStudentMeta">—</p>
-                </div>
-                <button id="closeModal" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface transition-colors flex-shrink-0">
-                    <span class="material-symbols-outlined text-on-surface-variant">close</span>
-                </button>
-            </div>
-
-            <div id="modalSubjectsList" class="space-y-3"></div>
-
-            <div id="modalNoSubjects" class="hidden text-center py-6">
-                <span class="material-symbols-outlined text-4xl text-on-surface-variant/40">menu_book</span>
-                <p class="text-body-md text-on-surface-variant mt-2">أضف مادة أولاً من أعلى الصفحة</p>
-            </div>
-        </div>
-
-        <!-- Footer ثابت دايمًا ظاهر -->
-        <div class="p-6 pt-3 border-t border-outline-variant flex-shrink-0">
-            <button id="saveDegreesBtn" class="w-full bg-secondary text-white py-3.5 rounded-xl font-bold shadow-md active:scale-95 transition-transform flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                <span class="material-symbols-outlined">save</span>
-                <span id="saveDegreesBtnText">حفظ الدرجات</span>
-            </button>
-        </div>
-
-    </div>
+  </main>
 </div>
 
-<!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<!-- Bottom Nav (Mobile) -->
-<nav class="md:hidden bg-surface-container flex justify-around items-center px-2 py-2 rounded-t-xl border-t border-outline-variant shadow-lg fixed bottom-0 left-0 w-full z-50">
-    <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="attendance.html">
-        <span class="material-symbols-outlined mb-1">calendar_today</span><span class="text-label-bold">الحضور</span>
-    </a>
-    <a class="flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="students.html">
-        <span class="material-symbols-outlined mb-1">group</span>
-        <span class="text-label-bold">الطلبة</span>
-    </a>
-    <a class="flex flex-col items-center justify-center text-secondary font-bold scale-95 w-16 h-14" href="tests.html">
-        <span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">grading</span><span class="text-label-bold">التقييمات</span>
-    </a>
-    <a class="reports-btn flex flex-col items-center justify-center text-on-surface-variant w-16 h-14" href="reports.html">
-        <span class="material-symbols-outlined mb-1">analytics</span><span class="text-label-bold">التقارير</span>
-    </a>
-</nav>
-
-<script src="assets/js/tests.js"></script>
+<script src="assets/js/main.js"></script>
 </body>
 </html>
