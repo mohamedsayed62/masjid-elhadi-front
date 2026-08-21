@@ -232,6 +232,17 @@
     function getStudentId(s) { return String(s.student_id || s._id || s.id); }
 
     /**
+     * Normalize a subject name for comparison/dedup purposes: trims
+     * surrounding whitespace and applies Unicode NFKC normalization so
+     * visually-identical Arabic strings (different composed forms, stray
+     * whitespace) are treated as the same subject instead of silently
+     * forking into near-duplicates.
+     */
+    function normalizeSubjectName(name) {
+        return (name || '').trim().normalize('NFKC');
+    }
+
+    /**
      * Combine the full student roster with whatever test/degree records
      * exist. GET /tests/{userId} only returns students who already have at
      * least one recorded degree, so on its own it silently hides anyone the
@@ -263,6 +274,19 @@
         const set = new Set();
         list.forEach(s => (s.subjects || []).forEach(sub => { if (sub.name) set.add(sub.name); }));
         return set;
+    }
+
+    /**
+     * Single source of truth for "every subject name known so far" — merges
+     * names actually present on students with the accumulating suggestions
+     * set (defaults + anything typed in this session), normalized so the
+     * filter <select> and the add-subject datalist never drift out of sync.
+     */
+    function getAllKnownSubjects() {
+        const set = new Set();
+        collectSubjectsFromStudents(students).forEach(name => set.add(normalizeSubjectName(name)));
+        subjectSuggestions.forEach(name => set.add(normalizeSubjectName(name)));
+        return [...set].sort((a, b) => a.localeCompare(b, 'ar'));
     }
 
     /** Class-best (max) degree per subject name — used for relative grading colors. */
@@ -298,6 +322,11 @@
             .slice(0, n);
     }
 
+    /** Count of students who have at least one recorded subject matching `name`. */
+    function countStudentsWithSubject(name) {
+        return students.filter(s => (s.subjects || []).some(sub => sub.name === name)).length;
+    }
+
     function getVisibleStudents() {
         let ranked = [...students].sort((a, b) => (Number(b.totalDegree) || 0) - (Number(a.totalDegree) || 0));
 
@@ -311,33 +340,16 @@
         return ranked;
     }
 
-    // =====================================================================
-    // Subject suggestions <datalist> — injected once, refreshed as data grows
-    // =====================================================================
-    let subjectDatalistEl = null;
-
-    function ensureSubjectDatalist() {
-        if (subjectDatalistEl) return;
-        subjectDatalistEl = document.createElement('datalist');
-        subjectDatalistEl.id = 'subjectSuggestionsList';
-        document.body.appendChild(subjectDatalistEl);
-    }
-
-    function refreshSubjectDatalist() {
-        ensureSubjectDatalist();
-        subjectDatalistEl.innerHTML = [...subjectSuggestions]
-            .sort((a, b) => a.localeCompare(b, 'ar'))
-            .map(name => `<option value="${escapeHtml(name)}"></option>`)
-            .join('');
-    }
-
+    /**
+     * Records a subject name into the session's growing suggestions set.
+     * The add-subject `<select>` is rebuilt from `getAllKnownSubjects()`
+     * every time the modal re-renders, so there's no separate DOM list to
+     * keep in sync — just remember the name for next time.
+     */
     function registerSubjectName(name) {
-        const trimmed = (name || '').trim();
+        const trimmed = normalizeSubjectName(name);
         if (!trimmed) return;
-        if (!subjectSuggestions.has(trimmed)) {
-            subjectSuggestions.add(trimmed);
-            refreshSubjectDatalist();
-        }
+        subjectSuggestions.add(trimmed);
     }
 
     // =====================================================================
@@ -359,8 +371,7 @@
         }
 
         students = mergeStudentsWithTests(roster, testsData);
-        collectSubjectsFromStudents(students).forEach(name => subjectSuggestions.add(name));
-        refreshSubjectDatalist();
+        collectSubjectsFromStudents(students).forEach(name => subjectSuggestions.add(normalizeSubjectName(name)));
     }
 
     // =====================================================================
@@ -458,6 +469,7 @@
                     </div>
                     <div class="flex flex-col sm:flex-row gap-2">
                         <div class="relative flex-1">
+                            <label for="studentSearch" class="sr-only">ابحث عن طالب بالاسم</label>
                             <span class="material-symbols-outlined absolute top-1/2 -translate-y-1/2 right-3 text-on-surface-variant text-lg pointer-events-none">search</span>
                             <input type="text" id="studentSearch" aria-label="ابحث عن طالب بالاسم"
                                 class="w-full bg-surface rounded-xl border border-outline-variant py-2.5 pr-10 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50"
@@ -468,14 +480,15 @@
                             </button>` : ''}
                         </div>
                         ${allSubjects.length ? `
+                        <label for="subjectFilterSelect" class="sr-only">تصفية حسب المادة</label>
                         <select id="subjectFilterSelect" aria-label="تصفية حسب المادة"
-                            class="bg-surface rounded-xl border border-outline-variant py-2.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50 sm:w-40">
-                            <option value="">كل المواد</option>
-                            ${allSubjects.map(name => `<option value="${escapeHtml(name)}" ${subjectFilter === name ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('')}
+                            class="bg-surface rounded-xl border border-outline-variant py-2.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50 sm:w-44">
+                            <option value="">كل المواد (${students.length})</option>
+                            ${allSubjects.map(name => `<option value="${escapeHtml(name)}" ${subjectFilter === name ? 'selected' : ''}>${escapeHtml(name)} (${countStudentsWithSubject(name)})</option>`).join('')}
                         </select>` : ''}
                     </div>
                 </div>
-                <div class="divide-y divide-outline-variant max-h-[65vh] overflow-y-auto" id="studentsList">
+                <div class="divide-y divide-outline-variant max-h-[65vh] overflow-y-auto" id="studentsList" aria-live="polite">
                     ${visible.length ? renderStudentRows(visible) : renderNoSearchResults()}
                 </div>
             </section>
@@ -704,6 +717,9 @@
                 </button>` : ''}
             </div>`).join('');
 
+        const NEW_SUBJECT_VALUE = '__new__';
+        const knownSubjects = getAllKnownSubjects();
+
         const addRowHtml = `
             <div class="border border-dashed border-outline-variant rounded-xl p-3">
                 <div class="flex items-center gap-2 mb-2">
@@ -711,8 +727,14 @@
                     <span class="text-xs font-bold text-on-surface-variant">إضافة مادة</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <input type="text" id="newSubjectName" list="subjectSuggestionsList" placeholder="اسم المادة" aria-label="اسم المادة الجديدة"
-                        class="flex-1 min-w-0 bg-white border border-outline-variant rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50" autocomplete="off"/>
+                    <label for="newSubjectSelect" class="sr-only">اختر المادة</label>
+                    <select id="newSubjectSelect" aria-label="اختر المادة"
+                        class="flex-1 min-w-0 bg-white border border-outline-variant rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50">
+                        <option value="">-- اختر مادة --</option>
+                        ${knownSubjects.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
+                        <option value="${NEW_SUBJECT_VALUE}">+ مادة جديدة...</option>
+                    </select>
+                    <label for="newSubjectDegree" class="sr-only">درجة المادة الجديدة</label>
                     <input type="number" id="newSubjectDegree" step="0.01" min="0" inputmode="decimal" placeholder="الدرجة" aria-label="درجة المادة الجديدة"
                         class="w-20 text-center bg-white border border-outline-variant rounded-lg py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-secondary/50"/>
                     <button id="addSubjectBtn" type="button" aria-label="إضافة المادة"
@@ -720,6 +742,12 @@
                         <span class="material-symbols-outlined text-lg">add</span>
                     </button>
                 </div>
+                <div id="newSubjectCustomWrap" class="mt-2 hidden">
+                    <label for="newSubjectCustomName" class="sr-only">اسم المادة الجديدة</label>
+                    <input type="text" id="newSubjectCustomName" placeholder="اكتب اسم المادة الجديدة" aria-label="اسم المادة الجديدة"
+                        class="w-full bg-white border border-outline-variant rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-secondary/50" autocomplete="off"/>
+                </div>
+                <p id="newSubjectHint" class="text-[11px] text-secondary font-bold pt-1.5 hidden"></p>
             </div>
             ${hasExistingRows ? `<p class="text-[11px] text-on-surface-variant/70 text-center pt-1">لحذف مادة محفوظة سابقًا، تواصل مع الإدارة</p>` : ''}`;
 
@@ -749,24 +777,71 @@
         });
 
         document.getElementById('addSubjectBtn').addEventListener('click', handleAddSubject);
-        document.getElementById('newSubjectName').addEventListener('keydown', e => {
+
+        const newSubjectSelect     = document.getElementById('newSubjectSelect');
+        const newSubjectCustomWrap = document.getElementById('newSubjectCustomWrap');
+        const newSubjectCustomName = document.getElementById('newSubjectCustomName');
+        const newSubjectDegree     = document.getElementById('newSubjectDegree');
+        const newSubjectHint       = document.getElementById('newSubjectHint');
+
+        // Toggle the free-text field only for the explicit "new subject" choice.
+        newSubjectSelect.addEventListener('change', () => {
+            const isCustom = newSubjectSelect.value === NEW_SUBJECT_VALUE;
+            newSubjectCustomWrap.classList.toggle('hidden', !isCustom);
+            if (isCustom) {
+                newSubjectCustomName.focus();
+            } else {
+                updateNewSubjectHint(newSubjectSelect.value);
+            }
+        });
+
+        function updateNewSubjectHint(name) {
+            const normalized = normalizeSubjectName(name);
+            const existing = normalized && modalSubjects.find(s => normalizeSubjectName(s.name) === normalized);
+            if (existing) {
+                newSubjectHint.textContent = `سيتم تحديث درجة "${existing.name}" الحالية بدلًا من إضافة مادة جديدة`;
+                newSubjectHint.classList.remove('hidden');
+            } else {
+                newSubjectHint.classList.add('hidden');
+            }
+        }
+
+        // Live feedback so a teacher finds out about a name collision before
+        // they submit, instead of only via a toast afterward.
+        newSubjectCustomName.addEventListener('input', () => updateNewSubjectHint(newSubjectCustomName.value));
+        newSubjectCustomName.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); handleAddSubject(); }
+        });
+        newSubjectDegree.addEventListener('keydown', e => {
             if (e.key === 'Enter') { e.preventDefault(); handleAddSubject(); }
         });
     }
 
+    /** Resolves the subject name currently chosen in the add-subject row (dropdown pick, or the custom field when "+ مادة جديدة" is selected). */
+    function getSelectedNewSubjectName() {
+        const select = document.getElementById('newSubjectSelect');
+        if (select.value === '__new__') {
+            return normalizeSubjectName(document.getElementById('newSubjectCustomName').value);
+        }
+        return normalizeSubjectName(select.value);
+    }
+
     function handleAddSubject() {
-        const nameInput   = document.getElementById('newSubjectName');
-        const degreeInput = document.getElementById('newSubjectDegree');
-        const name   = (nameInput.value || '').trim();
+        const select       = document.getElementById('newSubjectSelect');
+        const isCustom     = select.value === '__new__';
+        const focusTarget  = isCustom ? document.getElementById('newSubjectCustomName') : select;
+        const degreeInput  = document.getElementById('newSubjectDegree');
+        const name   = getSelectedNewSubjectName();
         const degree = Number(degreeInput.value);
 
-        if (!name) { showToast('يرجى إدخال اسم المادة', 'error'); nameInput.focus(); return; }
+        if (!select.value) { showToast('يرجى اختيار مادة', 'error'); select.focus(); return; }
+        if (!name) { showToast('يرجى إدخال اسم المادة الجديدة', 'error'); focusTarget.focus(); return; }
         if (Number.isNaN(degree) || degree < 0) { showToast('يرجى إدخال درجة صحيحة', 'error'); degreeInput.focus(); return; }
         if (degree > CONFIG.DEGREE_SANITY_CEILING) {
             showToast(`تنبيه: الدرجة ${formatDegree(degree)} تبدو كبيرة، تأكد من صحتها`, 'warning');
         }
 
-        const existing = modalSubjects.find(s => s.name === name);
+        const existing = modalSubjects.find(s => normalizeSubjectName(s.name) === name);
         if (existing) {
             existing.degree = degree;
         } else {
@@ -776,7 +851,7 @@
         registerSubjectName(name);
         renderModal();
         // Keep focus in the add-row so a teacher can rapid-fire several subjects.
-        document.getElementById('newSubjectName')?.focus();
+        document.getElementById('newSubjectSelect')?.focus();
         showToast(`✓ تمت إضافة "${name}"`, 'success');
     }
 
@@ -925,7 +1000,5 @@
     // =====================================================================
     // Boot
     // =====================================================================
-    ensureSubjectDatalist();
-    refreshSubjectDatalist();
     initAdminPanel().then(() => render());
 })();
